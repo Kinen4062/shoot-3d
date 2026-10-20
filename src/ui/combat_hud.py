@@ -40,6 +40,7 @@ RGB_HP_OK = (110, 235, 150)
 RGB_HP_WARN = (250, 200, 90)
 RGB_HP_LOW = (235, 90, 85)
 RGB_SHIELD = (110, 235, 235)
+RGB_LOCKED = (190, 150, 90)
 # 和 liang 的本体色同源（0.62, 0.18, 0.55）。血条和敌人一个颜色，
 # 玩家不用读字就知道"这条是谁的血"。
 RGB_BOSS = (214, 96, 190)
@@ -99,6 +100,11 @@ class CombatHud:
                                  scale=0.9, rgb=RGB_MUTED, origin=(1, 0))
         self.ammo_text = label(self.root, "", (right.x - PAD, right.y + 0.025),
                                scale=1.7, origin=(1, 0))
+        # 锁定提示挂在**武器名上面**，不是弹药下面 —— 弹药下面 0.010 处是换弹条，
+        # 再往下就出屏幕了（right.y 已经是窗口下边缘）。
+        self.lock_text = label(self.root, "", (right.x - PAD, right.y + 0.098),
+                               scale=0.85, rgb=RGB_LOCKED, origin=(1, 0))
+        self.lock_text.visible = False
         self.reload_bg = Entity(parent=self.root, model="quad",
                                 color=rgba32((0, 0, 0), 0.5),
                                 origin=(1, 0),
@@ -177,6 +183,17 @@ class CombatHud:
             RGB_HP_LOW if weapon.ammo == 0 else RGB_TEXT
         )
 
+        # 按了还没解锁的槽位 → 在弹药下面挂一行提示，3 秒后自己消失。
+        # 不这么做的话，前 9 波按 3 完全没有反馈，玩家只会以为键位坏了。
+        locked = getattr(self.weapon, "locked_name", "")
+        if locked and getattr(self.weapon, "locked_left", 0.0) > 0.0:
+            self.lock_text.text = (
+                f"{locked.upper()} LOCKED · {self.weapon.unlock_hint(locked)}"
+            )
+            self.lock_text.visible = True
+        else:
+            self.lock_text.visible = False
+
         if weapon.reloading:
             total = data.reload_time or 1.0
             left = max(0.0, min(1.0, weapon.reload_left / total))
@@ -234,7 +251,9 @@ class CombatHud:
             pip.color = rgba32(RGB_SHIELD, 0.14)
         self.reload_bg.visible = False
         self.reload_fill.visible = False
-        # BOSS 血条必须一起清掉：重开时敌人列表被清空，但血条是**独立节点**，
+        self.lock_text.text = ""
+        self.lock_text.visible = False
+        # BOSS 血条是**独立节点**，重开时敌人列表被清空但它不会自己跟着走。
         # 不在这里收起来的话它会挂着上一局的长度留在屏幕顶上。
         self.boss_text.text = ""
         self.boss_text.visible = False

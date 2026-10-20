@@ -30,12 +30,20 @@ def light_gun(mag=5, fire_rate=0.1, reload_time=1.0):
 
 def test_weapons_json_loads_and_is_complete():
     data = load_weapons(config.resource_path(config.WEAPON_FILE))
-    assert set(data) == {"pistol", "rifle"}
+    assert set(data) == {"pistol", "rifle", "shotgun"}
     assert data["rifle"].auto is True
     assert data["pistol"].auto is False
     assert data["rifle"].mag_size == 30
     assert data["rifle"].spread > 0
     assert data["rifle"].range >= data["pistol"].range
+    # 霰弹枪：7 颗弹丸、7 发弹匣、第 10 波解锁。
+    assert data["shotgun"].pellets == 7
+    assert data["shotgun"].mag_size == 7
+    assert data["shotgun"].unlock_wave == 10
+    # 距离分段是"2 格 / 4 格"，1 格 = GROUND_GRID_CELL 米。
+    # 写死 4/8 会把这层关系藏起来，改成按格子反推，改格子大小的时候能立刻发现。
+    assert data["shotgun"].tight_range == config.GROUND_GRID_CELL * 2
+    assert data["shotgun"].wide_range == config.GROUND_GRID_CELL * 4
 
 
 def test_fallback_matches_shipped_json():

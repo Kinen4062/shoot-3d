@@ -33,6 +33,7 @@ KEY_AIM_UP = "right mouse up"
 # 切枪：数字键。数据里的顺序由 weapons.json 决定，这里按下标映射。
 KEY_WEAPON_1 = "1"
 KEY_WEAPON_2 = "2"
+KEY_WEAPON_3 = "3"
 
 KEY_PAUSE = "escape"
 KEY_DEBUG_CYCLE = "tab"
@@ -98,3 +99,5 @@ class InputMap:
             weapon.switch(0)
         elif key == KEY_WEAPON_2:
             weapon.switch(1)
+        elif key == KEY_WEAPON_3:
+            weapon.switch(2)

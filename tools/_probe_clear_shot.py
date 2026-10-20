@@ -129,3 +129,30 @@ for enemy in list(enemies.enemies):
 step(0.3)
 shot("boss_end.png")
 print("     state =", state.state.name, " kind =", session.cleared_kind)
+
+# ---- 4. 霰弹枪 HUD：拿着它 / 还没解锁时的提示 ----
+session.start_run()
+step(DT)
+weapon = world["weapon"]
+hud = world["combat_hud"]
+
+# 4a. 第 15 波，按 3 切到霰弹枪 → 右下角应该显示 SHOTGUN 7/7
+waves.wave = 15
+world["data"].wave = 15
+step(0.15)
+assert weapon.switch(weapon.slots.index("shotgun")) is True
+step(0.2)
+shot("hud_shotgun.png")
+print("     weapon =", weapon.weapon_name,
+      " ammo =", f"{weapon.current.ammo}/{weapon.current.data.mag_size}")
+
+# 4b. 第 5 波，按 3 → 切不过去，但要在弹药上方留一行 3 秒的锁定提示。
+session.start_run()
+step(DT)
+waves.wave = 5
+world["data"].wave = 5
+step(0.15)
+weapon.switch(weapon.slots.index("shotgun"))
+step(0.2)
+shot("hud_locked.png")
+print("     weapon =", weapon.weapon_name, " locked =", repr(weapon.locked_name))

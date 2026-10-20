@@ -135,6 +135,9 @@ def build_world() -> dict:
     weapon = WeaponSystem(player, camera_rig, game_state, enemies, tracer, crosshair, gun)
     controller = PlayerController(player, camera_rig, arena, game_state, weapon=weapon)
     waves = WaveSystem(enemies, arena, camera_rig, game_state)
+    # 武器要知道当前波次才能判断霰弹枪解锁没有。波次系统比武器晚构造，
+    # 所以这里后挂（和 `enemies.projectiles = projectiles` 同一个约定）。
+    weapon.waves = waves
 
     # ---- M4：计分与道具 ----
     # 两者共用同一份 GameData（唯一真相源）。HUD 也读它，
