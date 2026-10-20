@@ -54,6 +54,7 @@ class WeaponData:
     auto: bool
     pellets: int = 1        # 一次扣弹打几条射线。1 = 普通枪
     unlock_wave: int = 0    # 从第几波起可以切到这把枪（0 = 一开始就有）
+    late_mag_size: int = 0  # 第 `MAG_UPGRADE_WAVE` 波起的弹匣容量。0 = 不升级
     # ---- 距离分段。tight_range = 0 表示这把枪不分段（手枪/步枪）----
     tight_range: float = 0.0    # 这个距离以内：最小散布 + 全额伤害
     wide_range: float = 0.0     # 到这个距离：散布涨到 far_spread 倍
@@ -64,8 +65,8 @@ class WeaponData:
 _REQUIRED = ("damage", "fire_rate", "mag_size", "reload_time", "spread", "range", "auto")
 # 可选字段：JSON 里没写就用 dataclass 的默认值。全部显式列出来，
 # 避免哪天在 JSON 里写错键名（比如 "tight" 写成 "tight_range_"）却静默走默认值。
-_OPTIONAL = ("pellets", "unlock_wave", "tight_range", "wide_range",
-             "far_damage", "far_spread")
+_OPTIONAL = ("pellets", "unlock_wave", "late_mag_size",
+             "tight_range", "wide_range", "far_damage", "far_spread")
 
 
 def _weapon_from(name: str, raw: dict) -> WeaponData:
@@ -82,6 +83,8 @@ def _weapon_from(name: str, raw: dict) -> WeaponData:
         kwargs["pellets"] = int(raw["pellets"])
     if "unlock_wave" in raw:
         kwargs["unlock_wave"] = int(raw["unlock_wave"])
+    if "late_mag_size" in raw:
+        kwargs["late_mag_size"] = int(raw["late_mag_size"])
     for key in ("tight_range", "wide_range", "far_damage", "far_spread"):
         if key in raw:
             kwargs[key] = float(raw[key])
@@ -98,11 +101,13 @@ def load_weapons(path: str) -> dict[str, WeaponData]:
 
 # 打包后 data/ 丢了也要能玩：内置一份和 weapons.json 一致的兜底
 FALLBACK_WEAPONS: dict[str, WeaponData] = {
-    "pistol": WeaponData("pistol", 25, 0.25, 12, 1.2, 0.25, 60, False, 1),
-    "rifle": WeaponData("rifle", 18, 0.1, 30, 1.8, 0.5, 80, True, 1),
+    "pistol": WeaponData("pistol", 25, 0.25, 12, 1.2, 0.25, 60, False, 1,
+                         late_mag_size=18),
+    "rifle": WeaponData("rifle", 18, 0.1, 30, 1.8, 0.5, 80, True, 1,
+                        late_mag_size=45),
     "shotgun": WeaponData(
-        "shotgun", 20, 0.8, 7, 1.2, 2.5, 40, False,
-        pellets=7, unlock_wave=10,
+        "shotgun", 20, 0.5, 15, 1.2, 2.5, 40, True,
+        pellets=10, unlock_wave=10, late_mag_size=20,
         tight_range=4.0, wide_range=8.0, far_damage=0.5, far_spread=4.0,
     ),
 }
@@ -115,9 +120,29 @@ class WeaponState:
 
     def __init__(self, data: WeaponData) -> None:
         self.data = data
-        self.ammo = data.mag_size
+        # **不是 `data.mag_size` 的只读代理**：第 20 波会换弹匣，
+        # 而 `data` 是 frozen 的共享数据。所有容量判断都读这个字段，
+        # 别再出现 `self.data.mag_size`（否则升级之后换弹会按老容量截断）。
+        self.mag_size = data.mag_size
+        self.ammo = self.mag_size
         self.cooldown = 0.0
         self.reload_left = 0.0
+
+    def set_mag_size(self, size: int) -> None:
+        """换弹匣。`size` 变大时**补上差额**，不吞玩家已经压着的子弹。
+
+        比如第 20 波步枪 30 → 45：手上还剩 12 发，升级后变成 27 发。
+        玩家不会因为"刚好在升级那一刻没补满"而吃亏，也不需要重装一遍。
+        容量变小时截断到新上限（重开一局会把容量还原，这时不补）。
+        """
+        delta = size - self.mag_size
+        self.mag_size = size
+        if delta > 0:
+            self.ammo = min(size, self.ammo + delta)
+        else:
+            self.ammo = min(self.ammo, size)
+        # 不碰 `reload_left`：升级**不主动打断**正在进行的换弹。
+        # 正在装填时换弹匣，装填结束时自然补到新容量（`update` 读的是 self.mag_size）。
 
     @property
     def reloading(self) -> bool:
@@ -135,10 +160,10 @@ class WeaponState:
             self.reload_left -= dt * reload_scale
             if self.reload_left <= 0.0:
                 self.reload_left = 0.0
-                self.ammo = self.data.mag_size
+                self.ammo = self.mag_size
 
     def needs_reload(self) -> bool:
-        return self.ammo < self.data.mag_size and not self.reloading
+        return self.ammo < self.mag_size and not self.reloading
 
     def can_fire(self) -> bool:
         return self.cooldown <= 0.0 and not self.reloading and self.ammo > 0
@@ -154,13 +179,27 @@ class WeaponState:
         return True
 
     def request_reload(self) -> bool:
-        if self.reloading or self.ammo >= self.data.mag_size:
+        if self.reloading or self.ammo >= self.mag_size:
             return False
         self.reload_left = self.data.reload_time
         # 换弹提示音从这里发，而不是从输入层发：
         # 打空弹匣会自动换弹（consume() 里调这个方法），那条路径不经过按键。
         event_bus.emit("reload_started", weapon=self.data.name)
         return True
+
+
+def wave_damage_bonus(wave: int) -> int:
+    """第 `wave` 波时，**单颗弹丸**的额外伤害。
+
+    每 `config.DAMAGE_BONUS_STEP`（5）波 +1：第 1~4 波 +0，第 5~9 波 +1，
+    …… 第 30 波 +6，BOSS 层（31）+6。
+
+    为什么是"每 5 波 +1"而不是按比例乘：按比例乘的话，三把枪的差距会
+    被一起放大（手枪 25 → 34、步枪 18 → 24），后期仍然是"手枪最猛"；
+    固定加值反而让弹丸多的枪收益更高（霰弹枪 10 颗 = 每波 +10 总伤），
+    这正好是后期最需要补的那把。
+    """
+    return max(0, int(wave)) // config.DAMAGE_BONUS_STEP
 
 
 def effective_spread(aiming: bool, data: WeaponData) -> float:
@@ -205,15 +244,20 @@ def spread_at(data: WeaponData, distance: float, aiming: bool = False) -> float:
     return base * (1.0 + (data.far_spread - 1.0) * t)
 
 
-def damage_at(data: WeaponData, distance: float) -> float:
+def damage_at(data: WeaponData, distance: float, bonus: float = 0.0) -> float:
     """单颗弹丸的伤害。超过 `tight_range` 直接阶跃到 `far_damage` 倍。
 
     用阶跃而不是渐变：规划里的口径是"2 格外伤害减半"，一刀切玩家能立刻感知到
     "该走近再打"；线性衰减在实战里只表现为"有时候伤害莫名其妙低一点"。
+
+    `bonus` 是波次成长（`wave_damage_bonus`）。**先加再乘**：
+    远距离的减半是"这一枪打得远"的惩罚，成长是"枪本身变强了"，
+    两者是乘法关系 —— 先乘后加会让霰弹枪在 30 波时远距离反而更划算。
     """
+    per_pellet = data.damage + bonus
     if data.tight_range > 0.0 and distance > data.tight_range:
-        return data.damage * data.far_damage
-    return data.damage
+        return per_pellet * data.far_damage
+    return per_pellet
 
 
 log = get_logger("weapon")
@@ -302,6 +346,28 @@ class WeaponSystem:
         """当前波次。没有波次来源时返回 0（= 所有锁定武器都关着）。"""
         return int(getattr(self.waves, "wave", 0) or 0)
 
+    @property
+    def damage_bonus(self) -> int:
+        """这一波每颗弹丸的额外伤害（每 5 波 +1，见 `wave_damage_bonus`）。"""
+        return wave_damage_bonus(self.wave_number)
+
+    def _sync_mag_sizes(self) -> None:
+        """按当前波次对齐每把枪的弹匣容量（第 `MAG_UPGRADE_WAVE` 波换大弹匣）。
+
+        每帧比一次而不是"在第 20 波那一刻触发一次"：波次是可以被跳过的
+        （探针直接改 `waves.wave`、以后加调试跳波），事件式会在这些路径上失效，
+        而"每帧对齐到目标值"天然幂等 —— 重开归零也会自动缩回去。
+        """
+        upgraded = self.wave_number >= config.MAG_UPGRADE_WAVE
+        for state in self.states.values():
+            target = state.data.mag_size
+            if upgraded and state.data.late_mag_size > 0:
+                target = state.data.late_mag_size
+            if target != state.mag_size:
+                before = state.mag_size
+                state.set_mag_size(target)
+                log.info(f"[M2] {state.data.name} 弹匣 {before} -> {target} 发")
+
     def available(self, name: str) -> bool:
         """这把枪现在能不能用。"""
         return self.weapons[name].unlock_wave <= self.wave_number
@@ -370,13 +436,16 @@ class WeaponSystem:
         weapon = self.current
         before = weapon.ammo
         weapon.reload_left = 0.0
-        weapon.ammo = weapon.data.mag_size
+        weapon.ammo = weapon.mag_size
         return weapon.ammo - before
 
     def reset(self) -> None:
         """重开一局。所有枪回满弹、状态清零、切回默认武器。"""
         for weapon in self.states.values():
-            weapon.ammo = weapon.data.mag_size
+            # 先还原基础弹匣再补满。重开之后波次归零，不还原的话
+            # 第 20 波之后重开会带着 45 发步枪、20 发霰弹开局。
+            weapon.set_mag_size(weapon.data.mag_size)
+            weapon.ammo = weapon.mag_size
             weapon.cooldown = 0.0
             weapon.reload_left = 0.0
         default = config.DEFAULT_WEAPON
@@ -409,6 +478,7 @@ class WeaponSystem:
         # 丢了 up 则会一直连发。每帧对一次，两种都修掉。
         self._sync_input()
 
+        self._sync_mag_sizes()
         self._update_weapons(dt)
 
         self.gun.follow(self.player, self.rig)
@@ -496,11 +566,12 @@ class WeaponSystem:
             target = enemy_from(hit.entity)
             if target is not None:
                 self.hits += 1
-                target.take_damage(data.damage)
+                damage = data.damage + self.damage_bonus
+                target.take_damage(damage)
                 self.crosshair.on_hit()
                 # 命中音效走事件：M5 的音频系统订阅它，武器层不需要认识音频。
                 # 击杀会紧接着发 enemy_died，两者音色不同，叠在一起才有打击感。
-                event_bus.emit("enemy_hit", damage=data.damage)
+                event_bus.emit("enemy_hit", damage=damage)
                 self.last_damaged = True
 
         self._log_miss_if_aiming(hit, origin, direction)
@@ -573,7 +644,7 @@ class WeaponSystem:
             if target is None:
                 continue
             slot = damage_by_target.setdefault(id(target), [target, 0.0])
-            slot[1] += damage_at(data, self._combat_distance(hit))
+            slot[1] += damage_at(data, self._combat_distance(hit), self.damage_bonus)
 
         total = 0.0
         for target, damage in damage_by_target.values():

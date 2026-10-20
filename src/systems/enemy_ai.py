@@ -59,6 +59,9 @@ class Brain:
         self.attack_cd = 0.0
         self.windup = 0.0
         self.sees = False
+        # BOSS 炮击的独立计时（`volley_cd = 0` 的敌人永远不会用到）。
+        # 第一次见面立刻打一发：出生点在 18~26 米外，玩家有整段距离看见它抬手。
+        self.volley_cd = 0.0
 
         # 下面这些是「本帧的输出」，由 EnemySystem 读取后应用到实体上。
         self.move_x = 0.0
@@ -66,6 +69,7 @@ class Brain:
         self.face_yaw = 0.0
         self.attack_now = False      # 近战：这一帧结算伤害
         self.shoot_now = False       # 远程：这一帧发射弹丸
+        self.volley_now = False      # BOSS 炮击：这一帧发射弹丸
 
         self._strafe_phase = 0.0
         self._strafe_dir = 1.0
@@ -82,7 +86,7 @@ class Brain:
     def kill(self) -> None:
         self.state = BrainState.DEAD
         self.move_x = self.move_z = 0.0
-        self.attack_now = self.shoot_now = False
+        self.attack_now = self.shoot_now = self.volley_now = False
 
     @property
     def busy(self) -> bool:
@@ -94,6 +98,7 @@ class Brain:
         # 每帧先清输出，避免上一帧的意图残留（经典 bug：敌人死了还在往前冲）。
         self.attack_now = False
         self.shoot_now = False
+        self.volley_now = False
         self.move_x = 0.0
         self.move_z = 0.0
 
@@ -112,6 +117,10 @@ class Brain:
             self.lost_time = 0.0
         else:
             self.lost_time += dt
+
+        # 炮击先于状态机结算：它在 CHASE / ATTACK 里都要开火，
+        # 放进某个分支里会出现"贴脸时不打炮"的漏洞。
+        self._tick_volley(dt, dist, sees)
 
         if self.state is BrainState.IDLE:
             if sees:
@@ -143,6 +152,21 @@ class Brain:
             self._attack(dt, dx, dz)
 
     # ---- 各状态行为 ----
+    def _tick_volley(self, dt: float, dist: float, sees: bool) -> None:
+        """BOSS 的炮击，和近战**独立计时**。
+
+        为什么必须独立：近战那套只在 3.2 米内才起前摇，玩家站在圈外就能
+        白嫖输出 —— 这就是"大号沙包"的根因。炮击覆盖 28 米，堵掉绕圈，
+        而贴脸时两套计时并行，玩家会同时挨近战和炮击，才谈得上"加强"。
+        """
+        data = self.data
+        if data.volley_cd <= 0.0:
+            return
+        self.volley_cd = max(0.0, self.volley_cd - dt)
+        if sees and dist <= data.volley_range and self.volley_cd <= 0.0:
+            self.volley_now = True
+            self.volley_cd = data.volley_cd
+
     def _walk_to_last_seen(self, dt: float, x: float, z: float) -> bool:
         """走向最后已知位置。返回 False 表示已经到达并切回 IDLE。"""
         if self.last_seen is None:

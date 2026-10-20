@@ -178,7 +178,9 @@ class CombatHud:
         weapon = self.weapon.current
         data = weapon.data
         self.weapon_text.text = data.name.upper()
-        self.ammo_text.text = f"{weapon.ammo} / {data.mag_size}"
+        # 容量读实例而不是 data：第 20 波会换大弹匣，
+        # data.mag_size 是初始值，升级后仍显示 30/30 就露馅了。
+        self.ammo_text.text = f"{weapon.ammo} / {weapon.mag_size}"
         self.ammo_text.color = rgba32(
             RGB_HP_LOW if weapon.ammo == 0 else RGB_TEXT
         )

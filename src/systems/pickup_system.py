@@ -111,7 +111,7 @@ def can_pickup(kind: str, player, weapon) -> bool:
         return player.hp < player.max_hp - 1e-6
     if kind == "ammo":
         current = weapon.current
-        return current.ammo < current.data.mag_size
+        return current.ammo < current.mag_size
     return True
 
 

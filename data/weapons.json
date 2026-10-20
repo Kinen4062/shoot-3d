@@ -7,7 +7,8 @@
     "spread": 0.25,
     "range": 60,
     "auto": false,
-    "pellets": 1
+    "pellets": 1,
+    "late_mag_size": 18
   },
   "rifle": {
     "damage": 18,
@@ -17,18 +18,20 @@
     "spread": 0.5,
     "range": 80,
     "auto": true,
-    "pellets": 1
+    "pellets": 1,
+    "late_mag_size": 45
   },
   "shotgun": {
     "damage": 20,
-    "fire_rate": 0.8,
-    "mag_size": 7,
+    "fire_rate": 0.5,
+    "mag_size": 15,
     "reload_time": 1.2,
     "spread": 2.5,
     "range": 40,
-    "auto": false,
-    "pellets": 7,
+    "auto": true,
+    "pellets": 10,
     "unlock_wave": 10,
+    "late_mag_size": 20,
     "tight_range": 4.0,
     "wide_range": 8.0,
     "far_damage": 0.5,

@@ -44,6 +44,15 @@ class EnemyData:
     ranged: bool = False
     preferred_range: float = 12.0     # 远程敌人想维持的距离
     projectile_speed: float = 22.0
+    # ---- BOSS 的炮击。`volley_cd = 0` 表示这个敌人没有远程手段 ----
+    # 和 `ranged` 是**两套东西**：`ranged` 决定"整场战斗都站在远处打"，
+    # 而 volley 是"一边近战一边定时开炮"——BOSS 两个都要，
+    # 所以不能复用 `ranged`（一开就再也不近身，反而更好打）。
+    volley_cd: float = 0.0            # 炮击间隔（秒）
+    volley_range: float = 0.0         # 这个距离内才会开炮
+    volley_damage: float = 0.0
+    volley_speed: float = 20.0
+    volley_color_rgb: tuple[int, int, int] | None = None   # 弹丸颜色，区分小兵
 
 
 def _to_rgb(raw) -> tuple[int, int, int]:
@@ -63,6 +72,17 @@ def _parse(name: str, raw: dict) -> EnemyData:
     scale = raw["scale"]
     if not isinstance(scale, (list, tuple)) or len(scale) != 3:
         raise ValueError(f"敌人类型 {name!r} 的 scale 必须是三元组")
+    volley_cd = float(raw.get("volley_cd", 0.0))
+    volley_range = float(raw.get("volley_range", 0.0))
+    volley_damage = float(raw.get("volley_damage", 0.0))
+    volley_speed = float(raw.get("volley_speed", 20.0))
+    volley_color = _to_rgb(raw["volley_color"]) if "volley_color" in raw else None
+    # 配了炮击却漏了射程/伤害 = 一个永远不开炮的 BOSS（不报错，只是"感觉很简单"）。
+    # 这种错误只有靠试玩才能发现，所以在加载阶段直接拦下来。
+    if volley_cd > 0.0 and (volley_range <= 0.0 or volley_damage <= 0.0):
+        raise ValueError(
+            f"敌人类型 {name!r} 配了 volley_cd 但缺少 volley_range / volley_damage"
+        )
     return EnemyData(
         name=name,
         hp=float(raw["hp"]),
@@ -79,6 +99,11 @@ def _parse(name: str, raw: dict) -> EnemyData:
         ranged=bool(raw.get("ranged", False)),
         preferred_range=float(raw.get("preferred_range", 12.0)),
         projectile_speed=float(raw.get("projectile_speed", 22.0)),
+        volley_cd=volley_cd,
+        volley_range=volley_range,
+        volley_damage=volley_damage,
+        volley_speed=volley_speed,
+        volley_color_rgb=volley_color,
     )
 
 
@@ -127,6 +152,10 @@ FALLBACK_ENEMY_TYPES: dict[str, EnemyData] = parse_enemy_types({
         "hp": 1200, "speed": 2.2, "damage": 35, "attack_range": 3.2, "attack_cd": 1.6,
         "attack_windup": 0.55, "view_range": 40, "score": 3000, "radius": 1.0,
         "color": [0.62, 0.18, 0.55], "scale": [1.6, 3.4, 1.6],
+        # 炮击：1 秒一发，28 米内都打。它逼玩家不能只在外圈绕圈放风筝 ——
+        # 只近战的话，站在 3.2 米外就能免费输出，这正是"大号沙包"的根因。
+        "volley_cd": 1.0, "volley_range": 28, "volley_damage": 16,
+        "volley_speed": 18, "volley_color": [1.0, 0.35, 0.72],
     },
 })
 

@@ -105,6 +105,15 @@
       1.6,
       3.4,
       1.6
+    ],
+    "volley_cd": 1.0,
+    "volley_range": 28,
+    "volley_damage": 16,
+    "volley_speed": 18,
+    "volley_color": [
+      1.0,
+      0.35,
+      0.72
     ]
   }
 }

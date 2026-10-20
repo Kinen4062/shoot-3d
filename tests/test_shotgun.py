@@ -87,19 +87,24 @@ def test_aiming_keeps_a_cone_for_pellets():
 
 # ---------------------------------------------------------------- 数值契约
 
-def test_point_blank_kills_a_wave_ten_grunt_in_one_shot():
-    """解锁那一波"刚好"一枪一个。
+def test_point_blank_burst_vs_late_wave_grunts():
+    """10 颗 × 20 = 200 的贴脸一发，和后期血量的对照。
 
-    第 10 波小兵 60 血 × hp 倍率 2.0 = 120，7 颗 × 20 = 140 > 120。
-    再往后血量倍率涨到 3.0（180 血）就打不死了 —— 这正是设计意图：
-    霰弹枪在解锁时最强，之后要靠贴脸和换枪。
+    改版前的口径是 7 颗 × 20 = 140：第 20 波（180 血）就打不动了。
+    现在 200 > 180，第 20 波仍是一枪；第 30 波（240 血）打不死，
+    但带上"每 5 波 +1"（第 30 波单颗 26 → 260）又追了回来 ——
+    成长曲线本身就是设计的一部分，两个方向都要钉住。
     """
     from src.systems.wave import hp_multiplier
+    from src.systems.weapon import wave_damage_bonus
 
     burst = SHOTGUN.pellets * damage_at(SHOTGUN, 2.0)
-    assert burst == 140
+    assert burst == 200
     assert burst > 60 * hp_multiplier(10)
-    assert burst < 60 * hp_multiplier(20), "第 20 波之后不该还能一枪一个"
+    assert burst > 60 * hp_multiplier(20)
+    assert burst < 60 * hp_multiplier(30), "不带成长时第 30 波打不死"
+    late = SHOTGUN.pellets * damage_at(SHOTGUN, 2.0, wave_damage_bonus(30))
+    assert late > 60 * hp_multiplier(30), "带上成长又追回来了"
 
 
 def test_tight_range_burst_fits_inside_a_grunt():
@@ -113,11 +118,11 @@ def test_tight_range_burst_fits_inside_a_grunt():
 def test_far_burst_scatters_and_loses_damage():
     """8 米外：单颗伤害减半，而且弹着圆已经远大于小兵 —— "随机散射"。
 
-    注意 7 颗**全中**只剩 70，这个数字本身不能说明"很弱"（第 1 波小兵才 60 血）。
+    注意 10 颗**全中**只剩 100，这个数字本身不能说明"很弱"（第 1 波小兵才 60 血）。
     真正让它弱的是命中率：弹着圆半径 1.4 米，小兵半径 0.5 米，
     均匀采样下只有约 (0.5/1.4)² ≈ 13% 的弹丸能落在身上。
     """
-    assert SHOTGUN.pellets * damage_at(SHOTGUN, WIDE) == 70
+    assert SHOTGUN.pellets * damage_at(SHOTGUN, WIDE) == 100
     radius = math.tan(math.radians(spread_at(SHOTGUN, WIDE))) * WIDE
     assert radius > 1.0, f"8 米处弹着圆半径只有 {radius:.2f} 米，散不开"
     landed = SHOTGUN.pellets * (0.5 / radius) ** 2
@@ -248,8 +253,12 @@ def test_background_reload_runs_at_half_speed():
 
 
 def test_background_weapon_reloads_without_being_held(no_mouse):
-    """把枪收起来之后它自己补弹。不收的话切枪等于从空弹匣重新开始。"""
-    weapon = make_weapon(30)
+    """把枪收起来之后它自己补弹。不收的话切枪等于从空弹匣重新开始。
+
+    用第 19 波而不是第 30 波：第 20 波会换大弹匣，`set_mag_size` 会顺手补上
+    差额，那就不是在验"换弹速度"了。
+    """
+    weapon = make_weapon(19)
     pistol = weapon.states["pistol"]
     pistol.ammo = 3
     assert weapon.weapon_name == config.DEFAULT_WEAPON != "pistol"
@@ -266,7 +275,7 @@ def test_background_weapon_reloads_without_being_held(no_mouse):
     for _ in range(120):
         weapon.update(1 / 60)
     assert not pistol.reloading
-    assert pistol.ammo == pistol.data.mag_size
+    assert pistol.ammo == pistol.mag_size == 12
 
 
 def test_switching_back_continues_the_same_reload(no_mouse):
@@ -302,3 +311,48 @@ def test_unknown_optional_field_is_rejected():
     }
     with pytest.raises(ValueError, match="未知字段"):
         wmod._weapon_from("broken", raw)
+
+# ---------------------------------------------------------------- 第 20 波换弹匣
+
+def test_magazine_grows_at_wave_twenty(no_mouse):
+    """三把枪一起升级：30→45 / 12→18 / 15→20。"""
+    weapon = make_weapon(19)
+    weapon.update(1 / 60)
+    assert weapon.states["rifle"].mag_size == 30
+    assert weapon.states["shotgun"].mag_size == 15
+
+    weapon.waves = SimpleNamespace(wave=20)
+    weapon.update(1 / 60)
+    assert weapon.states["rifle"].mag_size == 45
+    assert weapon.states["pistol"].mag_size == 18
+    assert weapon.states["shotgun"].mag_size == 20
+
+
+def test_magazine_upgrade_is_applied_once(no_mouse):
+    """每帧同步必须是幂等的 —— 否则弹药会被一直往上补到爆。"""
+    weapon = make_weapon(20)
+    weapon.update(1 / 60)                 # 同步发生在 update 里
+    rifle = weapon.states["rifle"]
+    assert rifle.ammo == 45
+    for _ in range(30):
+        weapon.update(1 / 60)
+    assert rifle.ammo == 45
+
+
+def test_reset_puts_the_base_magazine_back(no_mouse):
+    """重开一局要回到小弹匣，不然新一局开局就有 45 发。"""
+    weapon = make_weapon(21)
+    weapon.update(1 / 60)
+    assert weapon.states["rifle"].mag_size == 45
+    weapon.reset()
+    assert weapon.states["rifle"].mag_size == 30
+    assert weapon.states["rifle"].ammo == 30
+
+
+def test_damage_bonus_follows_the_wave(no_mouse):
+    weapon = make_weapon(14)
+    assert weapon.damage_bonus == 2
+    weapon.waves = SimpleNamespace(wave=30)
+    assert weapon.damage_bonus == 6
+    weapon.waves = None
+    assert weapon.damage_bonus == 0

@@ -44,6 +44,15 @@ BOSS_LAYER = {"tank": 2, "shooter": 5, "liang": 1}
 # 哪一型敌人是 BOSS。HUD 要靠它把"顶部血条挂在谁身上"这件事钉死，
 # 不写成散落各处的字面量 —— 改名字时只该改这一行。
 BOSS_KIND = "liang"
+# BOSS 层的增援：每 10 秒 6 只。
+# 加这个是因为 BOSS 只会上来近战：玩家在 3.2 米外绕圈，它就只是个血包。
+# 有增援之后场上始终有杂兵，玩家没法把它当成唯一目标慢慢磨。
+BOSS_REINFORCE_INTERVAL = 10.0
+BOSS_REINFORCE_COUNT = 6
+# 增援的类型权重。tank 只占 5%：BOSS 层本来就有 2 只重甲，
+# 再频繁刷重甲会让"先清杂兵"从选择变成义务，节奏就散了。
+BOSS_REINFORCE_TYPES = ("grunt", "runner", "shooter", "tank")
+BOSS_REINFORCE_WEIGHTS = (0.50, 0.30, 0.15, 0.05)
 
 
 @dataclass(frozen=True)
@@ -222,6 +231,13 @@ class WaveSystem:
         self.spawn_timer = 0.0
         self.queue: list[str] = []
         self.skipped = 0          # 重采样失败被跳过的次数（调试用）
+        # BOSS 层增援的计时与累计（覆盖层/HUD 会读，也方便测试断言）。
+        self.reinforce_timer = 0.0
+        self.reinforcements = 0
+        # "BOSS 是否已经真正出场过"。不能用 `boss_alive` 代替：
+        # 增援队列刚排好、BOSS 还没放出来时 `boss_alive` 也是 False，
+        # 用它当开关会把整层的第一波（含 BOSS 本体）直接判成"已打完"。
+        self.boss_spawned = False
 
     def reset(self) -> None:
         """重开一局（M4 会把它接进正式的 reset 契约）。
@@ -234,6 +250,9 @@ class WaveSystem:
         self.spawn_timer = 0.0
         self.queue.clear()
         self.skipped = 0
+        self.reinforce_timer = 0.0
+        self.reinforcements = 0
+        self.boss_spawned = False
 
     @property
     def cleared(self) -> bool:
@@ -253,6 +272,10 @@ class WaveSystem:
         self.timer = 3.0               # 给玩家一点喘息和看 HUD 的时间
         self.spawn_timer = 0.0
         self.queue.clear()
+        # 计时从"进入这一层"开始算，而不是从上一局的某个时刻接着算。
+        self.reinforce_timer = 0.0
+        self.reinforcements = 0
+        self.boss_spawned = False
         return True
 
     # ---- 每帧 ----
@@ -273,6 +296,8 @@ class WaveSystem:
             return
 
         # FIGHT
+        if self.wave >= BOSS_WAVE:
+            self._tick_reinforce(dt)
         if self.enemies.alive_count == 0:
             # 注意用 alive_count 而不是列表长度：死亡动画期间实体还在列表里，
             # 但已经不可攻击，用长度判断会让下一波永远等不来。
@@ -293,6 +318,45 @@ class WaveSystem:
             self.phase = "REST"
             self.timer = self.table.rest_time
 
+    @property
+    def boss_alive(self) -> bool:
+        """BOSS 本体还活着吗。BOSS 层之外恒为 False。"""
+        for enemy in self.enemies.enemies:
+            data = getattr(enemy, "data", None)
+            if enemy.alive and data is not None and data.name == BOSS_KIND:
+                return True
+        return False
+
+    def _tick_reinforce(self, dt: float) -> None:
+        """BOSS 层：每 `BOSS_REINFORCE_INTERVAL` 秒补一批杂兵。
+
+        **BOSS 一死就停**。不停的话 `alive_count` 永远回不到 0，
+        `boss_cleared` 永远等不到 —— "打死了 BOSS 却不过关"比没有增援更糟。
+        """
+        if not self.boss_alive:
+            return
+        self.reinforce_timer += dt
+        if self.reinforce_timer < BOSS_REINFORCE_INTERVAL:
+            return
+        self.reinforce_timer -= BOSS_REINFORCE_INTERVAL
+        if self.enemies.alive_count >= config.MAX_ENEMIES:
+            # 同屏已满：这一轮**直接放弃**，不排队等下一轮。
+            # 排进去的话，玩家清完一波会突然冒出两批，节奏完全对不上。
+            self.reinforce_timer = 0.0
+            return
+        picks = self.rng.choices(
+            BOSS_REINFORCE_TYPES, weights=BOSS_REINFORCE_WEIGHTS,
+            k=BOSS_REINFORCE_COUNT,
+        )
+        self.queue.extend(picks)
+        self.phase = "SPAWN"
+        self.spawn_timer = 0.0
+        self.reinforcements += len(picks)
+        counts: dict[str, int] = {}
+        for name in picks:
+            counts[name] = counts.get(name, 0) + 1
+        log.info(f"[M3] BOSS 层增援 {len(picks)} 只  {counts}")
+
     # ---- 内部 ----
     def _begin_wave(self) -> None:
         self.wave += 1
@@ -310,6 +374,16 @@ class WaveSystem:
         log.info(f"[M3] wave {self.wave} started  {comp}  hp×{hp_multiplier(self.wave):.2f}")
 
     def _spawn_step(self, dt: float) -> None:
+        if self.wave >= BOSS_WAVE and self.boss_spawned and not self.boss_alive:
+            # BOSS 已经倒下：还没放出来的增援全部作废。
+            # 不做这一步的话，打死 BOSS 之后队列里的 6 只还会陆续冒出来，
+            # 玩家看到的是"BOSS 倒了还在刷怪"，而且必须清完才算通关。
+            if self.queue:
+                log.info(f"[M3] BOSS 已倒下，取消 {len(self.queue)} 只未出场的增援")
+                self.queue.clear()
+            self.phase = "FIGHT"
+            return
+
         self.spawn_timer -= dt
         if self.spawn_timer > 0.0:
             return
@@ -335,6 +409,8 @@ class WaveSystem:
             self.spawn_timer = self.table.spawn_interval
             return
 
+        if type_name == BOSS_KIND:
+            self.boss_spawned = True
         self.enemies.spawn_type(
             type_name, point[0], point[1],
             hp_mult=hp_multiplier(self.wave),

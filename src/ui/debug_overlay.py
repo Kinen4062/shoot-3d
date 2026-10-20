@@ -119,9 +119,11 @@ class DebugOverlay:
             # 霰弹枪的 spread 带距离分段，实际开火时会按目标距离放大到 4 倍，
             # 所以这里标上弹丸数 —— 看到 "x7" 就知道 spread 那一列是**基准值**。
             pellets = f"  x{gun.data.pellets}" if gun.data.pellets > 1 else ""
+            bonus = self.weapon.damage_bonus
             lines.append(
-                f"gun     : {self.weapon.weapon_name}  {gun.ammo:2d}/{gun.data.mag_size}  {mode}"
+                f"gun     : {self.weapon.weapon_name}  {gun.ammo:2d}/{gun.mag_size}  {mode}"
                 f"  spread={self.weapon.spread_deg:.2f}deg{pellets}"
+                f"  dmg={gun.data.damage + bonus:.0f}(+{bonus})"
             )
             lines.append(
                 f"shots   : {self.weapon.shots}  hits={self.weapon.hits}  "
@@ -174,5 +176,5 @@ class DebugOverlay:
 
         lines.append("")
         lines.append("[TAB] cycle  [ESC] pause  WASD move  LMB fire  RMB aim  R reload  "
-                     "SPACE dodge  1/2 switch")
+                     "SPACE dodge  1/2/3 switch")
         self.label.text = "\n".join(lines)

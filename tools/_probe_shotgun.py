@@ -61,7 +61,8 @@ def build():
     gun = Gun()
     weapon = WeaponSystem(player, rig, state, enemies, TracerSystem(),
                           Crosshair(state), gun)
-    weapon.waves = type("W", (), {"wave": 30})()
+    # 第 1 波：没有伤害成长，量到的是"基础值"。成长曲线在第 6 段单独验。
+    weapon.waves = type("W", (), {"wave": 1})()
     state.set(State.PLAYING)
     return state, arena, player, rig, enemies, weapon
 
@@ -85,7 +86,7 @@ def fire_once(weapon, rig, target) -> tuple[float, int, int]:
     event_bus.on("enemy_hit", lambda damage=0, **_k: hits.append(damage))
 
     weapon.index = weapon.slots.index("shotgun")
-    weapon.current.ammo = weapon.current.data.mag_size
+    weapon.current.ammo = weapon.current.mag_size
     weapon.current.cooldown = 0.0
     weapon.current.reload_left = 0.0
     weapon.aiming = False
@@ -115,35 +116,43 @@ def main() -> None:
     state, arena, player, rig, enemies, weapon = build()
     data = weapon.weapons["shotgun"]
     tight, wide = data.tight_range, data.wide_range
+    # 期望值从数据里算，不写死：改弹丸数/伤害时探针不用跟着改。
+    bonus = weapon.damage_bonus
+    per_pellet = data.damage + bonus
+    burst = data.pellets * per_pellet
+    far_burst = burst * data.far_damage
     print(f"[probe] shotgun = {data}")
     print(f"         1 格 = {config.GROUND_GRID_CELL} 米  tight={tight}  wide={wide}")
+    print(f"         第 {weapon.wave_number} 波：单颗 {per_pellet:.0f} 贴脸合计 {burst:.0f}")
 
-    print("\n--- 1. 2 格以内：7 颗全中 ---")
+    print(f"\n--- 1. 2 格以内：{data.pellets} 颗全中 ---")
     tank = place(enemies, player, 2.0)
     damage, noises, hit_events = fire_once(weapon, rig, tank)
-    check("2 米处打出 140（7×20）", abs(damage - 140) < 0.01, f"{damage:.1f}")
+    check(f"2 米处打出 {burst:.0f}（{data.pellets}×{per_pellet:.0f}）",
+          abs(damage - burst) < 0.01, f"{damage:.1f}")
     check("一次扣弹只发一次噪音", noises == 1, f"{noises} 次")
     check("命中音效只响一次", hit_events == 1, f"{hit_events} 次")
-    check("一次扣弹只消耗 1 发", weapon.current.ammo == data.mag_size - 1,
-          f"{weapon.current.ammo}/{data.mag_size}")
+    check("一次扣弹只消耗 1 发", weapon.current.ammo == weapon.current.mag_size - 1,
+          f"{weapon.current.ammo}/{weapon.current.mag_size}")
 
     tank = place(enemies, player, 3.9)
     damage, _n, _h = fire_once(weapon, rig, tank)
-    check("3.9 米（2 格内边界）仍是 140", abs(damage - 140) < 0.01, f"{damage:.1f}")
+    check(f"3.9 米（2 格内边界）仍是 {burst:.0f}", abs(damage - burst) < 0.01,
+          f"{damage:.1f}")
 
     print("\n--- 2. 2 格外：伤害立刻减半 ---")
     tank = place(enemies, player, 4.2)
     damage, _n, _h = fire_once(weapon, rig, tank)
-    check("4.2 米处剩 70（7×10）", abs(damage - 70) < 0.01, f"{damage:.1f}")
-    check("减半是阶跃不是渐变", damage <= 70.001, f"{damage:.1f}")
+    check(f"4.2 米处剩 {far_burst:.0f}", abs(damage - far_burst) < 0.01, f"{damage:.1f}")
+    check("减半是阶跃不是渐变", damage <= far_burst + 0.001, f"{damage:.1f}")
 
     print("\n--- 3. 4 格外：散掉，命中数明显下降 ---")
     tank = place(enemies, player, 12.0)
     damage, _n, _h = fire_once(weapon, rig, tank)
-    check("12 米处伤害远低于 70", damage < 70.0 * 0.75, f"{damage:.1f}")
+    check(f"12 米处伤害远低于 {far_burst:.0f}", damage < far_burst * 0.75, f"{damage:.1f}")
     check("12 米处仍会中一两颗（不是全空）", damage > 0.0, f"{damage:.1f}")
-    landed = damage / (data.damage * data.far_damage)
-    check("12 米处命中的弹丸数 < 4", landed < 4.0, f"{landed:.1f} 颗")
+    landed = damage / (per_pellet * data.far_damage)
+    check("12 米处命中的弹丸数 < 5", landed < 5.0, f"{landed:.1f} 颗")
 
     print("\n--- 4. 瞄准只收窄、不归零 ---")
     tank = place(enemies, player, 12.0)
@@ -158,7 +167,24 @@ def main() -> None:
           f"腰射 {damage:.1f} → 瞄准 {aimed_damage:.1f}")
     check("瞄准时散布仍是正数", weapon.spread_deg > 0.0, f"{weapon.spread_deg:.2f}deg")
 
-    print("\n--- 5. 波次解锁 ---")
+    print("\n--- 5. 成长：每 5 波 +1 / 第 20 波换大弹匣 ---")
+    weapon.waves = type("W", (), {"wave": 30})()
+    weapon._sync_mag_sizes()
+    check("第 30 波单颗 +6", weapon.damage_bonus == 6, f"+{weapon.damage_bonus}")
+    check("霰弹枪弹匣 15 -> 20", weapon.states["shotgun"].mag_size == 20,
+          f"{weapon.states['shotgun'].mag_size}")
+    check("步枪弹匣 30 -> 45", weapon.states["rifle"].mag_size == 45,
+          f"{weapon.states['rifle'].mag_size}")
+    check("手枪弹匣 12 -> 18", weapon.states["pistol"].mag_size == 18,
+          f"{weapon.states['pistol'].mag_size}")
+    weapon.aiming = False
+    tank = place(enemies, player, 2.0)
+    damage, _n, _h = fire_once(weapon, rig, tank)
+    grown = data.pellets * (data.damage + 6)
+    check(f"第 30 波贴脸 {grown:.0f}（{data.pellets}×26）",
+          abs(damage - grown) < 0.01, f"{damage:.1f}")
+
+    print("\n--- 6. 波次解锁 ---")
     for wave, want in ((0, False), (9, False), (10, True), (30, True)):
         # 每次都先回到默认武器：`switch()` 对"已经拿着这把"直接返回 False，
         # 不清回去的话第 10 波成功之后，第 30 波会因为"已经是霰弹枪"而误判。

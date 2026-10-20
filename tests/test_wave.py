@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import math
 import random
+from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -148,3 +150,132 @@ def test_liang_exists_in_every_enemy_table():
     assert BOSS_KIND in FALLBACK_ENEMY_TYPES
     assert BOSS_KIND in SHAPES
     assert SHAPES[BOSS_KIND].feature == "crown"
+
+# ---------------------------------------------------------------- BOSS 层增援
+
+class _FakeEnemy:
+    def __init__(self, name: str, alive: bool = True, x: float = 5.0, z: float = 5.0) -> None:
+        self.data = SimpleNamespace(name=name)
+        self.alive = alive
+        # 生成点重采样会读现存的敌人坐标，缺这两个字段会 AttributeError。
+        self.x = x
+        self.z = z
+
+
+class _FakeEnemies:
+    def __init__(self) -> None:
+        self.enemies: list[_FakeEnemy] = []
+        self.player = None
+        self.spawned: list[str] = []
+
+    @property
+    def alive_count(self) -> int:
+        return sum(1 for e in self.enemies if e.alive)
+
+    def spawn_type(self, name: str, x: float, z: float, **_kwargs) -> None:
+        self.spawned.append(name)
+        self.enemies.append(_FakeEnemy(name))
+
+
+class _Arena:
+    # 类属性 + ClassVar：波次系统会读 `arena.pillar_boxes`，
+    # 写成可变默认值会被 ruff 判成"共享可变状态"。
+    pillar_boxes: ClassVar[list] = []
+
+
+class _Rig:
+    yaw = 0.0
+
+
+class _PlayingState:
+    def in_state(self, *_states) -> bool:
+        return True
+
+
+def make_boss_wave(seed: int = 3):
+    """造一个"已经在第 31 层 FIGHT 阶段"的波次系统。"""
+    from src.systems.wave import BOSS_WAVE, WaveSystem
+
+    enemies = _FakeEnemies()
+    enemies.enemies.append(_FakeEnemy("liang"))
+    waves = WaveSystem(enemies, _Arena(), _Rig(), _PlayingState(),
+                       table=FALLBACK_WAVES, rng=random.Random(seed))
+    waves.wave = BOSS_WAVE
+    waves.phase = "FIGHT"
+    waves.boss_spawned = True
+    return waves, enemies
+
+
+def step(waves, seconds: float, dt: float = 1 / 60) -> None:
+    for _ in range(round(seconds / dt)):
+        waves.update(dt)
+
+
+def test_boss_layer_reinforcements_arrive_every_ten_seconds():
+    from src.systems.wave import BOSS_REINFORCE_COUNT, BOSS_REINFORCE_INTERVAL
+
+    waves, enemies = make_boss_wave()
+    step(waves, BOSS_REINFORCE_INTERVAL - 0.2)
+    assert waves.reinforcements == 0, "不到 10 秒不该补兵"
+
+    step(waves, 0.4)
+    assert waves.reinforcements == BOSS_REINFORCE_COUNT
+    # 排队的同时已经在往外放了，所以按"队列 + 已出场"算总数。
+    assert len(waves.queue) + len(enemies.spawned) == BOSS_REINFORCE_COUNT
+    assert waves.phase in ("SPAWN", "FIGHT")
+
+
+def test_reinforcements_are_made_of_normal_enemy_types():
+    from src.systems.wave import BOSS_REINFORCE_TYPES
+
+    waves, _enemies = make_boss_wave(seed=9)
+    step(waves, 10.2)
+    assert waves.queue
+    assert set(waves.queue) <= set(BOSS_REINFORCE_TYPES)
+    assert "liang" not in waves.queue, "增援里再刷一只 BOSS 就没法通关了"
+
+
+def test_reinforcements_stop_once_the_boss_is_dead():
+    """BOSS 一死就不再补兵：不然 alive_count 永远回不到 0，永远不通关。"""
+    waves, enemies = make_boss_wave()
+    step(waves, 10.2)
+    first = waves.reinforcements
+
+    # 让队列先放完，回到 FIGHT（否则 update 走的是 SPAWN 分支）。
+    step(waves, 5.0)
+    waves.phase = "FIGHT"
+    enemies.enemies[0].alive = False        # BOSS 倒了，杂兵还在
+
+    step(waves, 25.0)
+    assert waves.reinforcements == first, "BOSS 死后不该再有增援"
+    assert waves.phase == "FIGHT"
+
+
+def test_pending_reinforcements_are_cancelled_after_the_boss_dies():
+    """队列里还没出场的那几只直接作废，别让玩家以为"BOSS 死了还在刷"。"""
+    waves, enemies = make_boss_wave()
+    step(waves, 10.2)
+    assert waves.queue
+
+    enemies.enemies[0].alive = False
+    waves.update(1 / 60)
+    assert waves.queue == []
+    assert waves.phase == "FIGHT"
+
+
+def test_reinforcements_respect_the_on_screen_cap():
+    waves, enemies = make_boss_wave()
+    enemies.enemies.extend(
+        _FakeEnemy("grunt") for _ in range(config.MAX_ENEMIES - 1)
+    )
+    assert enemies.alive_count == config.MAX_ENEMIES
+
+    step(waves, 20.5)
+    assert waves.reinforcements == 0, "场上满了就该跳过，而不是往队列里堆"
+
+
+def test_boss_layer_state_resets_between_runs():
+    waves, _enemies = make_boss_wave()
+    step(waves, 10.2)
+    waves.reset()
+    assert (waves.reinforce_timer, waves.reinforcements, waves.boss_spawned) == (0.0, 0, False)

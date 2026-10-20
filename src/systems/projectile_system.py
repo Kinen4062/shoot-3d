@@ -17,6 +17,10 @@ from src.core import config, event_bus
 from src.core.pool import EntityPool
 from src.core.ray import raycast
 
+# 小兵弹丸的颜色。BOSS 炮击会传 `tint` 覆盖它 —— 场上同时有 5 个 shooter 时，
+# 玩家必须能一眼分出"这发是 BOSS 打的"。
+DEFAULT_TINT = (255, 190, 80)
+
 
 def segment_hits_sphere(p0, p1, center, radius: float) -> bool:
     """线段到球心的最近距离是否小于半径。
@@ -56,11 +60,12 @@ class ProjectileSystem:
     def _make() -> Entity:
         return Entity(
             model="sphere",
-            color=color.rgb32(255, 190, 80),
+            color=color.rgb32(*DEFAULT_TINT),
             scale=config.PROJECTILE_RADIUS * 2,
         )
 
-    def fire(self, origin: Vec3, direction: Vec3, speed: float, damage: float) -> None:
+    def fire(self, origin: Vec3, direction: Vec3, speed: float, damage: float,
+             tint: tuple[int, int, int] | None = None) -> None:
         entity = self.pool.acquire()
         if entity is None:
             # 池空就丢弃，不扩容（规划书 §4.5）：突发流量下新建对象只会更卡。
@@ -68,6 +73,9 @@ class ProjectileSystem:
             return
         self.shots += 1
         entity.position = Vec3(origin)
+        # 池会复用实体，所以**每次开火都要重设颜色**：
+        # 只在小兵首次生成时设默认值的话，回收过的弹丸会带着上一发的颜色出场。
+        entity.color = color.rgb32(*(tint or DEFAULT_TINT))
         self._active.append([
             entity, direction.x * speed, direction.y * speed, direction.z * speed,
             config.PROJECTILE_LIFE, damage,

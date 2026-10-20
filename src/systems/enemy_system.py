@@ -191,6 +191,8 @@ class EnemySystem:
                 self._resolve_melee(enemy, data, px, pz)
             if brain.shoot_now:
                 self._resolve_ranged(enemy, data)
+            if brain.volley_now:
+                self._resolve_volley(enemy, data)
 
     def _resolve_melee(self, enemy: Enemy, data: EnemyData, px: float, pz: float) -> None:
         dx = px - enemy.x
@@ -208,6 +210,25 @@ class EnemySystem:
             return
         self.projectiles.fire(origin, direction.normalized(),
                               speed=data.projectile_speed, damage=data.damage)
+
+    def _resolve_volley(self, enemy: Enemy, data: EnemyData) -> None:
+        """BOSS 炮击。和 `_resolve_ranged` 只差弹丸参数和颜色。
+
+        出膛点放在胸口（0.5 × 身高）而不是脚踝：BOSS 三米多高，
+        从脚下飞出来的弹丸会被自己的碰撞体挡一半，看起来像"凭空消失"。
+        """
+        if self.projectiles is None:
+            return
+        origin = Vec3(enemy.x, enemy.y + enemy.scale_y * 0.5, enemy.z)
+        aim = Vec3(self.player.x, self.player.y, self.player.z)
+        direction = aim - origin
+        if direction.length() < 1e-4:
+            return
+        self.projectiles.fire(
+            origin, direction.normalized(),
+            speed=data.volley_speed, damage=data.volley_damage,
+            tint=data.volley_color_rgb,
+        )
 
     def _separate(self) -> None:
         """两两推开。30 个敌人 = 435 对/帧，纯平方距离比较，开销可忽略。"""

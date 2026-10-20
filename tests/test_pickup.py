@@ -48,6 +48,9 @@ class FakeWeaponState:
     def __init__(self, ammo=10, mag=30) -> None:
         from types import SimpleNamespace
         self.ammo = ammo
+        # 真实 WeaponState 的容量是**实例字段**（第 20 波会换弹匣），
+        # data.mag_size 只是初始值，拾取系统读的是前者。
+        self.mag_size = mag
         self.data = SimpleNamespace(mag_size=mag)
 
 
@@ -57,8 +60,8 @@ class FakeWeapon:
         self.refilled = 0
 
     def refill_current(self) -> int:
-        added = self.current.data.mag_size - self.current.ammo
-        self.current.ammo = self.current.data.mag_size
+        added = self.current.mag_size - self.current.ammo
+        self.current.ammo = self.current.mag_size
         self.refilled = added
         return added
 

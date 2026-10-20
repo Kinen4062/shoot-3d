@@ -122,6 +122,19 @@ print("     boss hp =", f"{boss.hp:.0f}/{boss.max_hp:.0f}",
       " bar =", f"{hud.boss_fill.scale_x:.3f}")
 print("     squad =", sorted(e.name for e in enemies.enemies if e.alive))
 
+# ---- 2b. 炮击：直接让它开三炮再拍 ----
+# 不等 AI 走完"看见 → 冷却 → 开炮"，那样要空跑好几秒，中途玩家可能先被打死。
+# 这里只验"画面上能不能分辨出粉紫色的 BOSS 弹丸"。
+for _ in range(3):
+    enemies._resolve_volley(boss, boss.data)
+step(0.35)                     # 让弹丸飞出去一段再拍
+camera.fov = 55.0
+camera.position = (bx + 9.0, 3.2, bz + 6.0)
+camera.look_at((bx, 1.6, bz))
+camera.rotation_z = 0
+shot("boss_volley.png")
+print("     projectiles =", world["projectiles"].shots, "发")
+
 # ---- 3. BOSS 倒下 → 真结局面板 ----
 for enemy in list(enemies.enemies):
     if enemy.alive:
@@ -144,7 +157,7 @@ assert weapon.switch(weapon.slots.index("shotgun")) is True
 step(0.2)
 shot("hud_shotgun.png")
 print("     weapon =", weapon.weapon_name,
-      " ammo =", f"{weapon.current.ammo}/{weapon.current.data.mag_size}")
+      " ammo =", f"{weapon.current.ammo}/{weapon.current.mag_size}")
 
 # 4b. 第 5 波，按 3 → 切不过去，但要在弹药上方留一行 3 秒的锁定提示。
 session.start_run()

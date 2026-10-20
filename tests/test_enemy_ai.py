@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import itertools
 import math
 
 import pytest
@@ -192,3 +193,58 @@ def test_separation_handles_exact_overlap():
     push = separation_push(1.0, 2.0, 1.0, 2.0, 0.5, 0.5)
     assert push is not None
     assert push != (0.0, 0.0)
+
+# ---------------------------------------------------------------- BOSS 炮击
+
+LIANG = FALLBACK_ENEMY_TYPES["liang"]
+
+
+def test_boss_volley_fires_once_per_second():
+    b = make(LIANG)
+    marks = []
+    for i in range(600):                     # 10 秒
+        b.tick(1 / 60, 0, 0, 0, 10, sees=True)
+        if b.volley_now:
+            marks.append(i / 60)
+    assert len(marks) >= 9, f"10 秒只有 {len(marks)} 发"
+    gaps = [b - a for a, b in itertools.pairwise(marks)]
+    assert all(abs(g - 1.0) < 0.05 for g in gaps), f"间隔不均：{gaps}"
+
+
+def test_boss_volley_needs_sight_and_range():
+    far = make(LIANG)
+    far.tick(1 / 60, 0, 0, 0, 40, sees=True)
+    assert not far.volley_now, "28 米外不该开炮"
+
+    blind = make(LIANG)
+    blind.tick(1 / 60, 0, 0, 0, 10, sees=False)
+    assert not blind.volley_now, "看不见目标时不能开炮"
+
+
+def test_boss_keeps_firing_while_it_melees():
+    """贴脸时近战和炮击并行 —— 这才是"加强"，不然它还是个大号沙包。"""
+    b = make(LIANG)
+    b.tick(1 / 60, 0, 0, 1.0, 0, sees=True)
+    assert b.state is BrainState.ATTACK
+    assert b.volley_now
+
+
+def test_only_the_boss_has_a_volley():
+    for name, data in FALLBACK_ENEMY_TYPES.items():
+        if name != "liang":
+            assert data.volley_cd == 0.0, f"{name} 不该有炮击"
+
+
+def test_liang_volley_values_are_configured():
+    assert LIANG.volley_cd == pytest.approx(1.0)
+    assert LIANG.volley_range >= 20
+    assert LIANG.volley_damage > 0
+    assert LIANG.volley_color_rgb is not None, "弹丸要能和小兵的黄球分开"
+
+
+def test_shipped_enemy_table_matches_the_fallback():
+    """data/enemies.json 和内置兜底必须一致，否则打包后行为会悄悄变。"""
+    from src.core.enemy_types import load_enemy_types
+
+    shipped = load_enemy_types(config.resource_path(config.ENEMY_FILE))
+    assert shipped == FALLBACK_ENEMY_TYPES

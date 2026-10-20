@@ -36,10 +36,16 @@ def test_weapons_json_loads_and_is_complete():
     assert data["rifle"].mag_size == 30
     assert data["rifle"].spread > 0
     assert data["rifle"].range >= data["pistol"].range
-    # 霰弹枪：7 颗弹丸、7 发弹匣、第 10 波解锁。
-    assert data["shotgun"].pellets == 7
-    assert data["shotgun"].mag_size == 7
+    # 霰弹枪：连射、10 颗弹丸、15 发弹匣、第 10 波解锁。
+    assert data["shotgun"].pellets == 10
+    assert data["shotgun"].mag_size == 15
+    assert data["shotgun"].auto is True, "改版后是连射霰弹枪"
     assert data["shotgun"].unlock_wave == 10
+    # 第 20 波换大弹匣：数值写在数据里，阈值写在 config（MAG_UPGRADE_WAVE）。
+    assert data["pistol"].late_mag_size == 18
+    assert data["rifle"].late_mag_size == 45
+    assert data["shotgun"].late_mag_size == 20
+    assert config.MAG_UPGRADE_WAVE == 20
     # 距离分段是"2 格 / 4 格"，1 格 = GROUND_GRID_CELL 米。
     # 写死 4/8 会把这层关系藏起来，改成按格子反推，改格子大小的时候能立刻发现。
     assert data["shotgun"].tight_range == config.GROUND_GRID_CELL * 2
@@ -164,3 +170,51 @@ def test_tracer_angles_straight_up():
 def test_tracer_angles_yaw_follows_xz():
     _, yaw = tracer_angles(Vec3(1, 0, 1))
     assert yaw == pytest.approx(45.0)
+
+# ---------------------------------------------------------------- 局内成长
+
+def test_damage_bonus_steps_every_five_waves():
+    """每 5 波单颗弹丸 +1：第 5 波 +1、第 10 波 +2 …… 第 30 波 +6。"""
+    from src.systems.weapon import wave_damage_bonus
+
+    assert [wave_damage_bonus(w) for w in (0, 1, 4)] == [0, 0, 0]
+    assert [wave_damage_bonus(w) for w in (5, 9)] == [1, 1]
+    assert [wave_damage_bonus(w) for w in (10, 14)] == [2, 2]
+    assert wave_damage_bonus(30) == 6
+    assert wave_damage_bonus(31) == 6, "BOSS 层不该比 30 波更离谱"
+    assert wave_damage_bonus(-5) == 0, "异常波次不能把伤害算成负数"
+
+
+def test_damage_bonus_is_applied_before_the_far_multiplier():
+    """先加再乘。先乘后加的话远距离会"多赚"加成，霰弹枪的收束设计就废了。"""
+    from src.systems.weapon import damage_at, wave_damage_bonus
+
+    shotgun = FALLBACK_WEAPONS["shotgun"]
+    bonus = wave_damage_bonus(30)
+    assert damage_at(shotgun, 1.0, bonus) == shotgun.damage + bonus
+    assert damage_at(shotgun, 10.0, bonus) == (shotgun.damage + bonus) * 0.5
+    assert damage_at(shotgun, 10.0, bonus) == 13          # 不是 20*0.5+6 = 16
+
+
+def test_mag_upgrade_keeps_the_rounds_already_in_the_gun():
+    state = WeaponState(light_gun(mag=30))
+    state.ammo = 12
+    state.set_mag_size(45)
+    # 12 + (45-30) = 27：升级只补差额，不吞手上的子弹，也不整匣补满。
+    assert (state.mag_size, state.ammo) == (45, 27)
+
+
+def test_mag_shrink_clamps_ammo():
+    state = WeaponState(light_gun(mag=30))
+    state.ammo = 30
+    state.set_mag_size(12)
+    assert (state.mag_size, state.ammo) == (12, 12)
+
+
+def test_reload_fills_to_the_new_magazine():
+    state = WeaponState(light_gun(mag=30, reload_time=1.0))
+    state.ammo = 0
+    state.set_mag_size(45)
+    assert state.request_reload()
+    state.update(1.0)
+    assert state.ammo == 45
