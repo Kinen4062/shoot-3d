@@ -208,8 +208,94 @@ step(DT)
 check("回到 MENU", state.state is State.MENU)
 check("主菜单重新出现", visible(world["main_menu"]))
 check("HUD 已隐藏", not hud.root.visible)
-check("监听器没有翻倍", session.listener_count == 28,
+# 32 = 28（M5）+ 4（通关：run_cleared / boss_cleared 各接两个 handler）。
+# 数字变了就要跟着改 —— 这条的重点是"重开前后一致"，硬编码只是顺手把
+# "订阅总数意外增多"也一起盯着。
+check("监听器没有翻倍", session.listener_count == 32,
       f"listeners={session.listener_count}")
+
+print("--- 7b. 三十波通关 → 结算面板 ---")
+# 手打 30 波要二十多分钟，探针里直接把波次系统摆到"第 30 波、场上没人"的状态，
+# 走的是**生产代码里那条真实的 FIGHT 结算分支**，不是伪造事件。
+session.start_run()
+step(DT)
+waves.wave = 30
+waves.phase = "FIGHT"
+waves.queue.clear()
+step(DT)
+clear_panel = world["clear_panel"]
+check("状态切到 CLEARED", state.state is State.CLEARED, state.state.name)
+check("通关面板可见", visible(clear_panel))
+check("结算面板没弹（通关不是死亡）", not visible(world["game_over"]))
+check("面板标题是 RUN CLEARED", clear_panel.title_text.text == "RUN CLEARED",
+      clear_panel.title_text.text)
+check("「进入 BOSS 层」按钮在", clear_panel.boss_button.visible)
+check("按钮真的点得到", clear_panel.boss_button.collider is not None,
+      "隐藏面板的按钮必须没有 collider")
+check("世界已冻结", world["clock"].paused is True)
+check("分数已落盘", data.best_score > 0, str(data.best_score))
+
+print("--- 7c. 进入 BOSS 层（第 31 波）---")
+check("进 BOSS 层成功", session.enter_boss_layer() is True)
+step(DT)
+check("回到 PLAYING", state.state is State.PLAYING, state.state.name)
+check("通关面板已隐藏", not visible(clear_panel))
+check("世界已解冻", world["clock"].paused is False, "否则点完按钮什么都不动")
+check("分数保留（不是新开一局）", data.score > 0, str(data.score))
+check("重开次数没变（还是 3）", session.restarts == 3, str(session.restarts))
+
+# 3 秒准备 + 逐只刷新，最多等 10 秒把 8 只放完。
+boss = None
+for _ in range(200):
+    step(0.05)
+    boss = next((e for e in world["enemies"].enemies if e.name == "liang"), None)
+    if boss is not None and waves.phase == "FIGHT":
+        break
+check("BOSS 层阵容 = 2 tank + 5 远程 + 1 BOSS",
+      sorted(e.name for e in world["enemies"].enemies if e.alive)
+      == sorted(["liang"] + ["tank"] * 2 + ["shooter"] * 5),
+      str(sorted(e.name for e in world["enemies"].enemies if e.alive)))
+check("BOSS 已刷出", boss is not None)
+check("BOSS 身高 3.4 米", boss is not None and abs(boss.scale_y - 3.4) < 1e-6,
+      f"{boss.scale_y if boss else '-'}")
+step(0.2)
+check("BOSS 血条出现", hud.boss_bg.visible and hud.boss_fill.visible)
+check("BOSS 血条文字", hud.boss_text.text.startswith("LIANG"),
+      hud.boss_text.text)
+check("血条满格", abs(hud.boss_fill.scale_x - hud._boss_w) < 1e-6,
+      f"{hud.boss_fill.scale_x:.3f}/{hud._boss_w:.3f}")
+boss.take_damage(boss.max_hp * 0.5)
+step(0.2)
+check("掉一半血后血条减半",
+      abs(hud.boss_fill.scale_x - hud._boss_w * 0.5) < 0.01,
+      f"{hud.boss_fill.scale_x:.3f}")
+
+print("--- 7d. 打死 BOSS → 真结局 ---")
+boss.take_damage(99999.0)
+for enemy in list(world["enemies"].enemies):
+    if enemy.alive:
+        enemy.take_damage(99999.0)
+step(0.4)
+check("状态切回 CLEARED", state.state is State.CLEARED, state.state.name)
+check("结局是 boss", session.cleared_kind == "boss", session.cleared_kind)
+check("面板标题是 LIANG DEFEATED",
+      clear_panel.title_text.text == "LIANG DEFEATED", clear_panel.title_text.text)
+check("「进入 BOSS 层」按钮已收起", not clear_panel.boss_button.visible,
+      "留着的话点了没反应，玩家会以为卡住")
+# 整块 HUD 在 CLEARED 下一起隐藏（和 GAME_OVER 一致），所以验的是 root，
+# 不是 `boss_bg.visible` —— 子节点还留着 True 也看不见。
+check("HUD 已整体隐藏（BOSS 血条跟着消失）", not hud.root.visible)
+
+print("--- 7e. 真结局后 PLAY AGAIN ---")
+session.start_run()
+step(DT)
+check("重开后 BOSS 血条状态清干净",
+      not (hud.boss_bg.visible or hud.boss_fill.visible or hud.boss_text.visible),
+      f"bg={hud.boss_bg.visible} fill={hud.boss_fill.visible}")
+check("重开后血条长度复位",
+      abs(hud.boss_fill.scale_x - hud._boss_w) < 1e-6, f"{hud.boss_fill.scale_x:.3f}")
+check("重开后回到第 0 波", waves.wave == 0, f"wave={waves.wave}")
+check("重开后 cleared_kind 复位", session.cleared_kind == "run", session.cleared_kind)
 
 print("--- 8. 音效 ---")
 audio = world["audio"]

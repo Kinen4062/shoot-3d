@@ -29,6 +29,19 @@ MIN_SPAWN_ANGLE = 75.0
 # 离墙至少留这么多，避免敌人一半卡在墙里
 WALL_MARGIN = 1.5
 
+# ---- 30 波主线 + 31 层 BOSS ----
+# 第 30 波清完 = 通关（不是继续无限刷）。之后可以主动进 31 层打 BOSS。
+MAX_WAVE = 30
+BOSS_WAVE = 31
+# 重甲兵的出场节奏：每 6 波一只，第 24/30 波两只。
+TANK_INTERVAL = 6
+DOUBLE_TANK_WAVES = (24, 30)
+# BOSS 层的固定阵容。BOSS 本身也算一只怪，由同一个敌人列表管理。
+BOSS_LAYER = {"tank": 2, "shooter": 5, "liang": 1}
+# 哪一型敌人是 BOSS。HUD 要靠它把"顶部血条挂在谁身上"这件事钉死，
+# 不写成散落各处的字面量 —— 改名字时只该改这一行。
+BOSS_KIND = "liang"
+
 
 @dataclass(frozen=True)
 class WaveTable:
@@ -95,23 +108,46 @@ def speed_multiplier(wave: int) -> float:
     return min(1.0 + 0.03 * wave, 1.5)
 
 
+def tank_count(wave: int) -> int:
+    """第 wave 波该出几只重甲。
+
+    第 6/12/18 波一只，第 24/30 波两只 —— 最后两波是"通关前的两道墙"。
+    第 7~30 波此前走的是公式分支，里面**根本没有 tank**，所以玩家打得越久
+    越看不到最有压迫感的兵种；这个函数就是补那个缺口。
+    """
+    if wave in DOUBLE_TANK_WAVES:
+        return 2
+    return 1 if wave % TANK_INTERVAL == 0 else 0
+
+
 def compose_wave(wave: int, table: WaveTable) -> dict[str, int]:
     """第 wave 波（从 1 开始）的敌人配比。
 
-    表内直接取；表外用公式继续加码，保证「打不完」——
-    否则通关压力会消失，验收里的「玩家会死」也就不成立了。
+    前 6 波是手写节奏（表内直接取）；第 7 波起用公式继续加码，
+    但**每一波都要按 `tank_count` 补重甲** —— 只靠 grunt/runner/shooter
+    的公式里没有重甲，30 波会变成一场没有起伏的消耗战。
+
+    第 31 波是 BOSS 层，阵容写死在 `BOSS_LAYER`。
     """
+    if wave == BOSS_WAVE:
+        return dict(BOSS_LAYER)
     if 1 <= wave <= len(table.waves):
         return dict(table.waves[wave - 1])
 
+    tanks = tank_count(wave)
     count = min(3 + wave, config.MAX_ENEMIES)
     shooters = min(1 + wave // 3, 6)
     runners = min(1 + wave // 2, 8)
-    grunts = max(1, count - shooters - runners)
-    total = grunts + runners + shooters
+    # 重甲占掉的名额要从总数里扣，否则第 30 波会变成 32 只挤 30 个位子，
+    # 生成队列会被同屏上限卡住，最后几只只能等前面死掉才出来。
+    grunts = max(1, count - shooters - runners - tanks)
+    total = grunts + runners + shooters + tanks
     if total > config.MAX_ENEMIES:
-        grunts = max(1, config.MAX_ENEMIES - shooters - runners)
-    return {"grunt": grunts, "runner": runners, "shooter": shooters}
+        grunts = max(1, config.MAX_ENEMIES - shooters - runners - tanks)
+    comp = {"grunt": grunts, "runner": runners, "shooter": shooters}
+    if tanks:
+        comp["tank"] = tanks
+    return comp
 
 
 def pick_spawn_point(
@@ -196,9 +232,32 @@ class WaveSystem:
         self.queue.clear()
         self.skipped = 0
 
+    @property
+    def cleared(self) -> bool:
+        """30 波已经打完、正在等玩家决定要不要进 BOSS 层。"""
+        return self.phase == "CLEARED" and self.wave == MAX_WAVE
+
+    def start_boss_layer(self) -> bool:
+        """从通关结算进入第 31 层。返回 False 表示现在不是那个时机。
+
+        只允许在 `cleared` 状态调用一次：重复调用会把 BOSS 层重新刷一遍，
+        而玩家此时正在结算面板上点按钮。
+        """
+        if not self.cleared:
+            return False
+        self.wave = BOSS_WAVE - 1      # `_begin_wave` 会 +1 变成 31
+        self.phase = "REST"
+        self.timer = 3.0               # 给玩家一点喘息和看 HUD 的时间
+        self.spawn_timer = 0.0
+        self.queue.clear()
+        return True
+
     # ---- 每帧 ----
     def update(self, dt: float) -> None:
         if not self.state.in_state(State.PLAYING):
+            return
+        if self.phase == "CLEARED":
+            # 已通关（或已打完 BOSS）：不再刷怪，等结算面板做决定。
             return
         if self.phase == "REST":
             self.timer -= dt
@@ -214,9 +273,22 @@ class WaveSystem:
         if self.enemies.alive_count == 0:
             # 注意用 alive_count 而不是列表长度：死亡动画期间实体还在列表里，
             # 但已经不可攻击，用长度判断会让下一波永远等不来。
+            event_bus.emit("wave_cleared", wave=self.wave)
+
+            if self.wave >= BOSS_WAVE:
+                # BOSS 层清完 = 真结局
+                self.phase = "CLEARED"
+                event_bus.emit("boss_cleared", wave=self.wave)
+                return
+            if self.wave >= MAX_WAVE:
+                # 第 30 波清完 = 通关。之后可以主动进 31 层打 BOSS，
+                # 但不是必须 —— 结算面板上给的是"可选"按钮。
+                self.phase = "CLEARED"
+                event_bus.emit("run_cleared", wave=self.wave)
+                return
+
             self.phase = "REST"
             self.timer = self.table.rest_time
-            event_bus.emit("wave_cleared", wave=self.wave)
 
     # ---- 内部 ----
     def _begin_wave(self) -> None:

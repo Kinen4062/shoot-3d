@@ -9,6 +9,7 @@ M4 阶段这些数字都写在左上角的调试覆盖层里 —— 那不是给
 
     左上：调试覆盖层      顶部居中：WAVE n · n LEFT
     左下：HP + 护盾格     右下：武器 + 弹药 + 换弹条
+    顶部第二条：BOSS 血条（只在 BOSS 活着时出现）
 
 **为什么血条要变颜色**：只有一个长度变化时，玩家在激烈交火里分不清
 "还剩七成"和"还剩三成"。颜色分档（>60% 绿 / 30~60% 黄 / <30% 红）
@@ -22,6 +23,7 @@ from __future__ import annotations
 from ursina import Entity, camera, color, window
 
 from src.core.game_state import State
+from src.systems.wave import BOSS_KIND
 from src.ui.widgets import RGB_MUTED, RGB_TEXT, Z_TEXT, label, rgba32
 
 TEXT_REFRESH = 0.1
@@ -30,10 +32,17 @@ BAR_WIDTH = 0.26
 BAR_HEIGHT = 0.014
 PAD = 0.025
 
+# BOSS 血条比玩家血条宽一倍：它是"整个屏幕的焦点"，宽度本身就是视觉层级。
+BOSS_BAR_WIDTH = 0.52
+BOSS_BAR_HEIGHT = 0.012
+
 RGB_HP_OK = (110, 235, 150)
 RGB_HP_WARN = (250, 200, 90)
 RGB_HP_LOW = (235, 90, 85)
 RGB_SHIELD = (110, 235, 235)
+# 和 liang 的本体色同源（0.62, 0.18, 0.55）。血条和敌人一个颜色，
+# 玩家不用读字就知道"这条是谁的血"。
+RGB_BOSS = (214, 96, 190)
 
 
 def hp_rgb(ratio: float) -> tuple[int, int, int]:
@@ -107,6 +116,27 @@ class CombatHud:
         self.wave_text = label(self.root, "", (0, window.top.y - 0.045),
                                scale=1.05, rgb=RGB_MUTED)
 
+        # ---- 顶部：BOSS 血条（平时隐藏）----
+        # 位置在波次文字下面 0.055 处。BOSS 只有 3.4 米高、1200 血，
+        # 不给一条整体血条的话，玩家打两分钟完全不知道还有多少 ——
+        # 左下角那条是**玩家**的血，混战里极易看错。
+        self._boss_w = BOSS_BAR_WIDTH
+        self._boss_y = window.top.y - 0.098
+        self.boss_text = label(self.root, "", (0, self._boss_y + 0.024),
+                               scale=1.15, rgb=RGB_BOSS)
+        self.boss_text.visible = False
+        self.boss_bg = Entity(parent=self.root, model="quad",
+                              color=rgba32((0, 0, 0), 0.60),
+                              scale=(self._boss_w + 0.006, BOSS_BAR_HEIGHT + 0.006),
+                              position=(0, self._boss_y),
+                              z=Z_TEXT + 0.01, visible=False)
+        self.boss_fill = Entity(parent=self.root, model="quad",
+                                color=rgba32(RGB_BOSS),
+                                origin=(-0.5, 0),
+                                scale=(self._boss_w, BOSS_BAR_HEIGHT),
+                                position=(-self._boss_w / 2, self._boss_y),
+                                z=Z_TEXT, visible=False)
+
         self._acc = TEXT_REFRESH
         self.reset()
 
@@ -164,6 +194,32 @@ class CombatHud:
         else:
             self.wave_text.text = f"WAVE {wave}   ·   {alive} LEFT"
 
+        self._refresh_boss()
+
+    def _refresh_boss(self) -> None:
+        """BOSS 在场才有血条。不在场时三个节点全部隐藏。
+
+        判据是"活着 + 类型名对得上"，**不是**"当前波次 >= 31"：
+        波次已经到 31 但 BOSS 被打死的那几帧里，血条必须立刻消失，
+        否则屏幕上会留着一条永不缩短的空条。
+        """
+        boss = None
+        if self.enemies is not None:
+            for enemy in self.enemies.enemies:
+                if getattr(enemy, "alive", False) and getattr(enemy, "name", "") == BOSS_KIND:
+                    boss = enemy
+                    break
+
+        for node in (self.boss_text, self.boss_bg, self.boss_fill):
+            node.visible = boss is not None
+        if boss is None:
+            return
+
+        max_hp = boss.max_hp or 1.0
+        ratio = max(0.0, min(1.0, boss.hp / max_hp))
+        self.boss_fill.scale_x = max(self._boss_w * ratio, 0.0)
+        self.boss_text.text = f"{BOSS_KIND.upper()}   {boss.hp:.0f} / {max_hp:.0f}"
+
     # ---- 重开 ----
     def reset(self) -> None:
         self.root.visible = False
@@ -178,3 +234,10 @@ class CombatHud:
             pip.color = rgba32(RGB_SHIELD, 0.14)
         self.reload_bg.visible = False
         self.reload_fill.visible = False
+        # BOSS 血条必须一起清掉：重开时敌人列表被清空，但血条是**独立节点**，
+        # 不在这里收起来的话它会挂着上一局的长度留在屏幕顶上。
+        self.boss_text.text = ""
+        self.boss_text.visible = False
+        self.boss_bg.visible = False
+        self.boss_fill.visible = False
+        self.boss_fill.scale_x = self._boss_w

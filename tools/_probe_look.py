@@ -79,33 +79,57 @@ shot("arena.png")
 from src.entities.enemy import spawn_enemy           # noqa: E402
 from src.core.enemy_types import FALLBACK_ENEMY_TYPES  # noqa: E402
 
-order = ("grunt", "runner", "tank", "shooter")
+order = ("grunt", "runner", "tank", "shooter", "liang")
 squad = []
 for i, kind in enumerate(order):
     data = FALLBACK_ENEMY_TYPES[kind]
     # yaw=0 才面朝 +Z（相机在 +Z 一侧）。写 180 的话看到的全是后背，
     # 而眼条是判断朝向的唯一线索，背对就等于没验。
-    squad.append(spawn_enemy(kind, data, -4.5 + i * 3.0, 6.0, yaw=0))
+    squad.append(spawn_enemy(kind, data, -5.0 + i * 2.5, 6.0, yaw=0))
 
 # 玩家正站在队列正中，会挡住 grunt。探针只验敌人，先藏起来。
 player.visible = False
 
-# 相机略微偏到一侧（约 12°）：正对着拍只能看到炮管的端面，
+# 相机略微偏到一侧（约 7°）：正对着拍只能看到炮管的端面，
 # 斜一点才看得出"肩上是往前伸的一根管子"和背包的厚度。
-camera.fov = 50.0
-camera.position = (3.6, 2.05, 17.4)
-camera.look_at((0, 1.15, 6.0))
+#
+# 机位参数是照 **横向** fov 算的：ursina 的 `camera.fov` 落到 Panda 的
+# `lens.setFov`，在这个引擎里按横向取景（实测 52° 时半宽 ≈ 0.49×距离）。
+# 第一版按纵向算，队列最外侧的 liang 直接被裁掉了半个身子。
+#   liang 在 x=+5.0 且宽 1.6 米 → 需要半宽 ≈ 5.9 米
+#   机位 z=20、目标 z=6 → 距离 14 米，fov 58° → 半宽 14×tan(29°) = 7.8 米
+camera.fov = 58.0
+camera.position = (1.4, 2.50, 20.0)
+camera.look_at((0.35, 1.35, 6.0))
 camera.rotation_z = 0
 shot("enemies.png")
+
+# 5. BOSS 与 tank 并排：BOSS 的辨识度全在剪影上，必须贴着 tank 看才有意义 ——
+#    单独拍一张"很大的一坨"说明不了它跟重甲兵的区别。
+for enemy in squad:
+    enemy.visible = False
+grunt, tank, boss = squad[0], squad[2], squad[4]
+for enemy in (tank, boss):
+    enemy.visible = True
+tank.x, tank.z = -1.7, 6.0
+boss.x, boss.z = 2.2, 6.0
+
+camera.fov = 42.0
+camera.position = (2.0, 2.35, 15.6)
+camera.look_at((0.3, 1.55, 6.0))
+camera.rotation_z = 0
+shot("boss_vs_tank.png")
 player.visible = True
 
-print("[ok] 四张图在", OUT)
+print("[ok] 五张图在", OUT)
 print("     grid texture =", world["arena"].ground.texture)
 print("     static lit   =", arena.static.shader is not None,
       " 碰撞代理 =", len(arena.solids))
 print("     ground lit   =", arena.ground.shader is not None)
 print("     player parts =", len(player.body.children))
 for kind, enemy in zip(order, squad):
+    # eye 合并进 mesh 后没有世界坐标了，直接读零件数据里的 center：
+    # 正数才算"朝 +Z"，也就是相机这一侧。
     print(f"     {kind:8s} parts={len(enemy.skin_parts):2d} "
           f"scale={tuple(round(v, 2) for v in enemy.scale)} "
-          f"eye_z={enemy.eye.world_z - enemy.world_position.z:+.2f}")
+          f"eye_z={enemy.eye.center[2]:+.2f}")

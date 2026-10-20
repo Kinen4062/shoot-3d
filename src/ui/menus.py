@@ -1,4 +1,4 @@
-"""三个界面：主菜单 / 暂停面板 / 结算面板。
+"""四个界面：主菜单 / 暂停面板 / 结算面板 / 通关面板。
 
 **它们只负责"长什么样"和"点了做什么"，不碰游戏状态**
 
@@ -26,10 +26,12 @@ from src.ui.widgets import (
     RGB_ACCENT,
     RGB_DANGER,
     RGB_MUTED,
+    RGB_TEXT,
     card,
     backdrop,
     button,
     label,
+    rgba32,
 )
 
 
@@ -227,9 +229,103 @@ class GameOverPanel(_Panel):
         self.record_text.text = "NEW RECORD" if summary.new_best else ""
 
 
+class ClearPanel(_Panel):
+    """通关结算。面板本体只有一套，靠 `kind` 切换成两种结局。
+
+    * `kind="run"`  —— 30 波清完。**多一个「进入 BOSS 层」按钮**，
+      而且这个按钮是可选的：不想打 BOSS 的玩家在这里就能收工。
+    * `kind="boss"` —— BOSS 层清完（真结局）。没有第二个结局可去，按钮收回两个。
+
+    为什么不复用 `GameOverPanel`：那边整块是"你死了"的语义
+    （红标题、慢镜头、最高分落盘）。通关时玩家还活着，
+    借用之后 `RunSession` 的"死亡才重开"判断会立刻出错。
+    """
+
+    def __init__(self, on_boss, on_restart, on_menu, audio=None) -> None:
+        super().__init__("clear_panel")
+        # 0.72 而不是死亡面板的 0.72 —— 这里多一行按钮，卡片必须高一点，
+        # 否则最下面那个会掉出卡片、悬在压暗层上。
+        backdrop(self.root, 0.72)
+        self._make_card((0.74, 0.74))
+
+        self.title_text = label(self.root, "RUN CLEARED", (0, 0.270),
+                                scale=3.8, rgb=RGB_ACCENT)
+        self.sub_text = label(self.root, "30 WAVES SURVIVED", (0, 0.205),
+                              scale=1.15, rgb=RGB_MUTED)
+
+        self._rows = {}
+        rows = (("SCORE", 0.130), ("KILLS", 0.080), ("TIME", 0.030), ("WAVE", -0.020))
+        for name, y in rows:
+            label(self.root, name, (-0.17, y), scale=1.1, rgb=RGB_MUTED, origin=(-0.5, 0))
+            self._rows[name] = label(self.root, "-", (0.17, y), scale=1.1, origin=(1, 0))
+
+        self.record_text = label(self.root, "", (0, -0.062), scale=1.05, rgb=RGB_ACCENT)
+
+        # 三个按钮的高度差是 0.082 —— 和死亡面板一致，按钮高 0.062 时
+        # 上下留 0.02 的缝，不至于粘成一块。
+        self.boss_button = self._add_button("ENTER BOSS LAYER", (0, -0.130),
+                                           on_boss, audio, width=0.40)
+        self.play_button = self._add_button("PLAY AGAIN", (0, -0.212), on_restart, audio)
+        self.menu_button = self._add_button("MAIN MENU", (0, -0.294), on_menu, audio)
+
+    # 两种结局的卡片高度 / 按钮位置。
+    #
+    # 真结局少一个按钮，**卡片必须跟着收一档**：不收的话藏起来的按钮会留一个
+    # 0.08 的空洞，两张按钮被挤在卡片下半部分，看起来像"少画了一个按钮"。
+    _LAYOUT = {
+        "run": (0.74, -0.130, -0.212, -0.294),
+        "boss": (0.68, None, -0.150, -0.232),
+    }
+
+    def show(self, summary: RunSummary | None = None, kind: str = "run") -> None:
+        boss = kind == "boss"
+        self.title_text.text = "LIANG DEFEATED" if boss else "RUN CLEARED"
+        self.title_text.color = rgba32(RGB_ACCENT if boss else RGB_TEXT)
+        self.sub_text.text = "TRUE ENDING" if boss else "30 WAVES SURVIVED"
+        if summary is not None:
+            self._rows["SCORE"].text = str(summary.score)
+            self._rows["KILLS"].text = str(summary.kills)
+            self._rows["TIME"].text = format_time(summary.seconds)
+            self._rows["WAVE"].text = str(summary.wave)
+            self.record_text.text = "NEW RECORD" if summary.new_best else ""
+
+        # BOSS 打完之后没有第二个结局，按钮必须收起来 ——
+        # 留着的话它还能再点，`start_boss_layer()` 会返回 False，
+        # 表现是"点了没反应"，玩家会以为卡住了。
+        self.boss_button.visible = not boss
+        height, boss_y, play_y, menu_y = self._LAYOUT["boss" if boss else "run"]
+        if boss_y is not None:
+            self.boss_button.y = boss_y
+        self.play_button.y = play_y
+        self.menu_button.y = menu_y
+        # `update()` 的弹出动画读的是 `_card_scale`，两边必须一起改，
+        # 否则动画会在第一帧把卡片弹回旧尺寸。
+        self._card_scale = (0.74, height)
+        if self._card is not None:
+            self._card.scale = self._card_scale
+        super().show()
+
+    def reset(self) -> None:
+        super().reset()
+        # 按钮的显隐 / 位置是 show() 里按结局改的，重开时先回到默认那一套；
+        # 不还原的话，上一局打完 BOSS、下一局打完 30 波会少一个按钮。
+        self.boss_button.visible = True
+        height, boss_y, play_y, menu_y = self._LAYOUT["run"]
+        self.boss_button.y = boss_y
+        self.play_button.y = play_y
+        self.menu_button.y = menu_y
+        self._card_scale = (0.74, height)
+        if self._card is not None:
+            self._card.scale = self._card_scale
+
+    def reset(self) -> None:
+        super().reset()
+        self.boss_button.visible = True
+
+
 __all__ = [
     "RunSummary", "build_summary", "format_time",
-    "MainMenu", "PauseMenu", "GameOverPanel",
+    "MainMenu", "PauseMenu", "GameOverPanel", "ClearPanel",
 ]
 
 

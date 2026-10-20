@@ -43,7 +43,7 @@ from src.ui.crosshair import Crosshair
 from src.ui.damage_flash import DamageFlash
 from src.ui.debug_overlay import DebugOverlay
 from src.ui.fps_counter import FpsCounter
-from src.ui.menus import GameOverPanel, MainMenu, PauseMenu, quit_game
+from src.ui.menus import ClearPanel, GameOverPanel, MainMenu, PauseMenu, quit_game
 from src.ui.score_hud import ScoreHud
 from src.ui.wave_banner import WaveBanner
 
@@ -163,6 +163,14 @@ def build_world() -> dict:
         on_menu=lambda: session.return_to_menu(),
         audio=audio,
     )
+    # 通关面板。`session` 此时还没建出来，所以回调用 lambda 延迟取 ——
+    # 直接写 `session.enter_boss_layer` 会在 build_world 里抛 NameError。
+    clear_panel = ClearPanel(
+        on_boss=lambda: session.enter_boss_layer(),
+        on_restart=lambda: session.start_run(),
+        on_menu=lambda: session.return_to_menu(),
+        audio=audio,
+    )
     pause_menu = PauseMenu(
         on_resume=game_state.toggle_pause,
         on_menu=lambda: session.return_to_menu(),
@@ -188,7 +196,7 @@ def build_world() -> dict:
     overlay.audio = audio
 
     damage_flash = DamageFlash()
-    wave_banner = WaveBanner()
+    wave_banner = WaveBanner(game_state)
 
     # ---- 事件接线 + 重开契约（全部集中在 session 里）----
     session = RunSession(
@@ -214,6 +222,7 @@ def build_world() -> dict:
         pause_menu=pause_menu,
         game_over=game_over,
         score_popup=score_popup,
+        clear_panel=clear_panel,
     )
     session.register_listeners()
     # 状态机在构造时就已经是 MENU 了，那时 session 还不存在，
@@ -238,7 +247,7 @@ def build_world() -> dict:
                  pickups, waves, score, tracer],
         ui_systems=[overlay, crosshair, damage_flash, wave_banner, hud,
                     combat_hud, score_popup, focus_watch, fps_counter, audio,
-                    main_menu, pause_menu, game_over],
+                    main_menu, pause_menu, game_over, clear_panel],
         clock=clock,
         state=game_state,
     )
@@ -279,6 +288,7 @@ def build_world() -> dict:
         "main_menu": main_menu,
         "pause_menu": pause_menu,
         "game_over": game_over,
+        "clear_panel": clear_panel,
         "session": session,
         "loop": loop,
         "overlay": overlay,

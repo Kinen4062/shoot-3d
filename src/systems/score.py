@@ -96,10 +96,23 @@ class ScoreSystem:
 
     def on_player_died(self, **_kwargs) -> None:
         """结算并落盘。最高分是唯一需要跨局保留的东西。"""
+        self.record_run("run over")
+
+    def on_run_finished(self, wave: int = 0, **_kwargs) -> None:
+        """通关落盘（30 波清完 / BOSS 打完）。
+
+        和 `on_player_died` 走同一段落盘逻辑，但**不能合并成一个 handler**：
+        只有 `player_died` 会把玩家标记为死亡，通关时玩家还活着。
+        另外通关不写"最高波次"以外的任何东西 —— 玩家可能在这里点
+        「主菜单」直接收工，不落盘的话这一局的分数就白打了。
+        """
+        self.record_run(f"run cleared @ wave {wave}")
+
+    def record_run(self, reason: str) -> None:
         stored = save.record_run(self.data.score, self.data.wave, self.data.kills)
         self.data.best_score = max(self.data.best_score, stored["best_score"])
         self.data.best_wave = max(self.data.best_wave, stored["best_wave"])
         print(
-            f"[M4] run over  score={self.data.score}  kills={self.data.kills}  "
+            f"[M4] {reason}  score={self.data.score}  kills={self.data.kills}  "
             f"wave={self.data.wave}  best={self.data.best_score}"
         )

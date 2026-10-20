@@ -64,6 +64,7 @@ class RunSession:
         pause_menu=None,
         game_over=None,
         score_popup=None,
+        clear_panel=None,
     ) -> None:
         self.state = state
         self.player = player
@@ -88,8 +89,12 @@ class RunSession:
         self.pause_menu = pause_menu
         self.game_over = game_over
         self.score_popup = score_popup
+        self.clear_panel = clear_panel
 
         self.restarts = 0
+        # 进 CLEARED 的是哪一次通关："run" = 30 波清完（还能进 BOSS 层），
+        # "boss" = BOSS 也打完了。面板靠它决定要不要显示「进入 BOSS 层」。
+        self.cleared_kind = "run"
         # 本局开始时的历史最高分。结算面板的「NEW RECORD」必须和它比，
         # 而不是和「当前 best」比 —— 死亡事件里计分系统已经把 best 更新完了。
         self._best_at_start = getattr(getattr(score, "data", None), "best_score", 0)
@@ -136,6 +141,12 @@ class RunSession:
         # ---- 状态 / 结算 ----
         sub("player_died", self.score.on_player_died)   # 写最高分
         sub("player_died", self.on_player_died)         # 切 GAME_OVER
+        # 通关：30 波清完 / BOSS 打完。两条都落盘，否则"打完就回主菜单"
+        # 这条路上的分数永远不会写进存档。
+        sub("run_cleared", self.score.on_run_finished)
+        sub("boss_cleared", self.score.on_run_finished)
+        sub("run_cleared", self.on_run_cleared)
+        sub("boss_cleared", self.on_run_cleared)
         sub("state_changed", self.on_state_changed)     # 重开 + 界面切换
         sub("state_changed", getattr(self.overlay, "on_state_changed", None))
         sub("state_changed", getattr(self.hud, "on_state_changed", None))
@@ -161,6 +172,37 @@ class RunSession:
     def on_player_died(self, **_kwargs) -> None:
         # 只切状态。分数落盘由 ScoreSystem 负责 —— 它才知道分数是多少。
         self.state.set(State.GAME_OVER)
+
+    def on_run_cleared(self, wave: int = 0, **_kwargs) -> None:
+        """30 波清完 或 BOSS 打完 → 进结算。
+
+        用 `wave` 区分两次通关，而不是各自写一个 handler：
+        两个事件的参数完全一样，分开写只会有两份几乎相同的代码。
+        `BOSS_WAVE` 在这里 import 会绕成循环依赖（wave 系统已经
+        import 了 game_state），所以直接比常量值 —— 判据是"打过 30 波了没有"。
+        """
+        from src.systems.wave import MAX_WAVE
+
+        self.cleared_kind = "run" if int(wave) <= MAX_WAVE else "boss"
+        self.state.set(State.CLEARED)
+
+    def enter_boss_layer(self) -> bool:
+        """通关面板上的「进入 BOSS 层」。返回 False 表示当下没这个选项。
+
+        三件事的顺序不能换：
+        1. 先让波次系统把 wave 推到 30（`start_boss_layer` 里 +1 变 31）。
+           放到 `set(PLAYING)` 之后的话，中间会有一帧 WaveSystem 还停在
+           CLEARED 阶段，虽然不致命，但下一帧才会刷怪这件事很难解释。
+        2. 再切 PLAYING。此时玩家还活着，`on_state_changed` 不会触发 reset_run
+           —— 这正是我们要的：BOSS 层是这一局的延续，不是新的一局。
+        3. 计分系统的 wave 数字由 `wave_started` 事件推进，不用手动同步。
+        """
+        if self.state.state is not State.CLEARED or self.cleared_kind != "run":
+            return False
+        if not self.waves.start_boss_layer():
+            return False
+        self.state.set(State.PLAYING)
+        return True
 
     def on_state_changed(self, old=None, new=None, **_kwargs) -> None:
         """从"死亡状态"回到 PLAYING 时自动重开一局。
@@ -203,6 +245,12 @@ class RunSession:
                 self.game_over.show(self.summary())
             else:
                 self.game_over.hide()
+
+        if self.clear_panel is not None:
+            if state is State.CLEARED:
+                self.clear_panel.show(self.summary(), self.cleared_kind)
+            else:
+                self.clear_panel.hide()
 
     def summary(self):
         """把整局数据整理成结算面板要的字段。没有计分系统时返回 None。"""
@@ -267,6 +315,7 @@ class RunSession:
 
         # 重开时重新记一次"开局最高分"，结算面板的 NEW RECORD 靠它判断。
         self._best_at_start = getattr(getattr(self.score, "data", None), "best_score", 0)
+        self.cleared_kind = "run"
 
         for ui in (self.crosshair, self.damage_flash, self.wave_banner,
                    self.hud, self.combat_hud, self.score_popup):

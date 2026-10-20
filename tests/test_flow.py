@@ -98,7 +98,27 @@ def clean(monkeypatch, tmp_path):
     set_data(None)
 
 
-def build(player=None, data=None):
+class FakeWaves(Stub):
+    """能真正拒绝 / 接受 `start_boss_layer()` 的波次替身。
+
+    `Stub` 的每个属性都会返回一个"什么都记录、返回 None"的函数，
+    拿它做 `start_boss_layer()` 的返回值永远是假 → `enter_boss_layer()` 永远返回 False，
+    没办法验证成功路径。
+    """
+
+    def __init__(self, allow: bool = True) -> None:
+        super().__init__("waves")
+        self.allow = allow
+        self.boss_starts = 0
+
+    def start_boss_layer(self) -> bool:
+        if not self.allow:
+            return False
+        self.boss_starts += 1
+        return True
+
+
+def build(player=None, data=None, waves=None):
     state = FakeState()
     player = player or FakePlayer()
     data = data or GameData()
@@ -107,6 +127,7 @@ def build(player=None, data=None):
         "main_menu": FakeBestPanel(),
         "pause_menu": FakePanel(),
         "game_over": FakePanel(),
+        "clear_panel": FakePanel(),
     }
     session = RunSession(
         state=state,
@@ -117,7 +138,7 @@ def build(player=None, data=None):
         enemies=Stub("enemies"),
         projectiles=Stub("projectiles"),
         pickups=Stub("pickups"),
-        waves=Stub("waves"),
+        waves=waves or Stub("waves"),
         score=score,
         tracer=Stub("tracer"),
         overlay=Stub("overlay"),
@@ -129,6 +150,7 @@ def build(player=None, data=None):
         main_menu=panels["main_menu"],
         pause_menu=panels["pause_menu"],
         game_over=panels["game_over"],
+        clear_panel=panels["clear_panel"],
     )
     session.register_listeners()
     return session, state, player, panels
@@ -262,3 +284,104 @@ def test_reset_run_rebases_new_record_threshold():
     assert session._best_at_start == 3000
     session.score.data.score = 1000
     assert session.summary().new_best is False
+
+
+# ---------------------------------------------------------------- 通关 / BOSS 层
+
+def test_run_cleared_switches_to_cleared_panel():
+    """30 波清完 → CLEARED 面板，且带的是 kind="run"（还能进 BOSS 层）。"""
+    session, state, _player, panels = build()
+    session.start_run()
+
+    event_bus.emit("run_cleared", wave=30)
+
+    assert state.state is State.CLEARED
+    assert panels["clear_panel"].visible
+    assert not panels["game_over"].visible, "通关不是死亡，结算面板不该弹"
+    assert session.cleared_kind == "run"
+    assert panels["clear_panel"].shows[-1][1] == "run"
+
+
+def test_boss_cleared_marks_kind_boss():
+    session, state, _player, panels = build()
+    session.start_run()
+
+    event_bus.emit("boss_cleared", wave=31)
+
+    assert state.state is State.CLEARED
+    assert session.cleared_kind == "boss"
+    assert panels["clear_panel"].shows[-1][1] == "boss"
+
+
+def test_clearing_records_the_run():
+    """通关也要落盘。玩家可能在这里直接点「主菜单」收工。"""
+    session, _state, _player, _panels = build()
+    session.score.data.score = 7777
+    session.score.data.wave = 30
+
+    event_bus.emit("run_cleared", wave=30)
+
+    assert session.score.data.best_score >= 7777
+
+
+def test_enter_boss_layer_rejected_when_not_cleared():
+    waves = FakeWaves()
+    session, state, _player, _panels = build(waves=waves)
+    session.start_run()
+
+    assert session.enter_boss_layer() is False
+    assert waves.boss_starts == 0
+    assert state.state is State.PLAYING
+
+
+def test_enter_boss_layer_rejected_after_boss_is_dead():
+    """真结局之后不能再进一次 BOSS 层 —— 按钮虽然会藏起来，逻辑也要自己守住。"""
+    waves = FakeWaves()
+    session, state, _player, _panels = build(waves=waves)
+    session.start_run()
+    event_bus.emit("boss_cleared", wave=31)
+
+    assert session.enter_boss_layer() is False
+    assert waves.boss_starts == 0
+    assert state.state is State.CLEARED
+
+
+def test_enter_boss_layer_continues_the_same_run():
+    """进 BOSS 层是**继续这一局**：不重开、不清场、玩家分数保留。"""
+    waves = FakeWaves()
+    session, state, player, _panels = build(waves=waves)
+    session.start_run()
+    resets_before = session.restarts
+    player_resets_before = player.resets
+    session.score.data.score = 5000
+    event_bus.emit("run_cleared", wave=30)
+
+    assert session.enter_boss_layer() is True
+
+    assert state.state is State.PLAYING
+    assert waves.boss_starts == 1
+    assert session.restarts == resets_before, "进 BOSS 层不能触发重开"
+    assert player.resets == player_resets_before
+    assert session.score.data.score == 5000
+
+
+def test_enter_boss_layer_fails_when_wave_system_refuses():
+    """波次系统说"现在不是时候"时，状态不能先切成 PLAYING。"""
+    waves = FakeWaves(allow=False)
+    session, state, _player, _panels = build(waves=waves)
+    session.start_run()
+    event_bus.emit("run_cleared", wave=30)
+
+    assert session.enter_boss_layer() is False
+    assert state.state is State.CLEARED, "拒绝了就不该把玩家丢回对局"
+
+
+def test_reset_run_clears_cleared_kind():
+    waves = FakeWaves()
+    session, _state, _player, _panels = build(waves=waves)
+    session.start_run()
+    event_bus.emit("boss_cleared", wave=31)
+    assert session.cleared_kind == "boss"
+
+    session.start_run()
+    assert session.cleared_kind == "run"

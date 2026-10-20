@@ -113,6 +113,17 @@ FALLBACK_ENEMY_TYPES: dict[str, EnemyData] = parse_enemy_types({
         "color": [0.95, 0.85, 0.3], "scale": [0.8, 1.7, 0.8],
         "ranged": True, "preferred_range": 13, "projectile_speed": 22,
     },
+    # BOSS「Liang」：只在第 31 层出现。
+    # 表里写的是**基础血量**，实际出场时还要乘上波次倍率
+    # （`wave.hp_multiplier(31)` 已经封顶到 4.0）→ 4800 血。
+    # 换算下来正好是同波 tank（200×4=800）的 6 倍，和"一只 BOSS 顶上
+    # 半个重甲小队"的观感对得上。2.2m/s 比 tank 快、35 伤一次、间隔 1.6 秒，
+    # 逼玩家把走位和换弹节奏都用上。
+    "liang": {
+        "hp": 1200, "speed": 2.2, "damage": 35, "attack_range": 3.2, "attack_cd": 1.6,
+        "attack_windup": 0.55, "view_range": 40, "score": 3000, "radius": 1.0,
+        "color": [0.62, 0.18, 0.55], "scale": [1.6, 3.4, 1.6],
+    },
 })
 
 

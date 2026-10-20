@@ -17,7 +17,9 @@ runner 的头会被纵向拉长 —— 这正是"一个模型打四个人"最典
 * **剪影**：runner 腿长细、tank 矮壮加双肩甲、shooter 肩上支出一根炮管；
 * **发光位置**：grunt 胸口横条 → tank 胸口粗条 → runner 腿侧竖条 → shooter 单点。
 
-颜色照旧由 `data.color_rgb` 派生，所以红/黄/紫的阵营关系没变。
+BOSS「Liang」（`kind="liang"`，3 米）没有"要跟谁区分"的问题，它要的是**在人群里
+一眼被认出来**：头顶五齿冠 + 双肩塔尖，全部是轮廓件。颜色照旧由
+`data.color_rgb` 派生，所以红/黄/紫的阵营关系没变。
 
 一次绘制画完一只敌人
 --------------------
@@ -82,6 +84,15 @@ SHAPES: dict[str, Shape] = {
     "shooter": Shape(foot=0.050, leg=0.410, torso=0.310, neck=0.030, head=0.160,
                      torso_w=0.78, arm=0.15, shoulder=0.43, eye=(0.35, 0.34),
                      feature="cannon"),
+    # BOSS「Liang」：3.4 米高、躯干最宽，扛着双肩塔尖和头顶冠。
+    #
+    # 比例之和刻意只到 0.85（其余类型都在 0.97 上下）—— 省下来的 15% 是为了
+    # **给冠留出位置**。身高是硬预算：零件顶到 h/2，`test_enemy_body_fits_its_hitbox`
+    # 会量。冠要是硬贴在满预算的头顶上，就会戳出碰撞盒，玩家瞄准冠打会打空。
+    # 所以这里把腿和躯干各让一点出来，冠和盔沿加起来正好填满到 1.0。
+    "liang": Shape(foot=0.050, leg=0.330, torso=0.330, neck=0.025, head=0.115,
+                   torso_w=1.00, arm=0.24, shoulder=0.52, eye=(0.90, 0.36),
+                   feature="crown"),
 }
 
 # 没登记的类型（`TargetDummy` 的 name 是 target_dummy）用标准兵体型兜底。
@@ -196,7 +207,8 @@ def build(parent: Entity, kind: str, size, rgb: tuple[int, int, int]) -> Body:
     )
 
     _add_feature(body, shape, pen, add, w, h, d,
-                 torso_top, torso_h, hip_y, leg_h, foot_h, shoulder_y, head_w)
+                 torso_top, torso_h, hip_y, leg_h, foot_h, shoulder_y, head_w,
+                 head_y, head_h)
 
     # ---- 烘焙成一个 mesh：一只敌人 = 一次绘制 ----
     body.shell = Entity(
@@ -211,8 +223,8 @@ def build(parent: Entity, kind: str, size, rgb: tuple[int, int, int]) -> Body:
 def _add_feature(body: Body, shape: Shape, pen, add, w: float, h: float, d: float,
                  torso_top: float, torso_h: float, hip_y: float,
                  leg_h: float, foot_h: float, shoulder_y: float,
-                 head_w: float) -> None:
-    """四种类型各自的"记号"。这是混战里唯一来得及分辨的东西。"""
+                 head_w: float, head_y: float, head_h: float) -> None:
+    """各类型各自的"记号"。这是混战里唯一来得及分辨的东西。"""
     if shape.feature == "chest_bar":
         # 普通兵：胸口一道横条，位置对着人眼高度，最容易被注意到。
         add("chest_bar", (w * 0.40, h * 0.035, d * 0.04),
@@ -242,3 +254,32 @@ def _add_feature(body: Body, shape: Shape, pen, add, w: float, h: float, d: floa
             (w * 0.40, shoulder_y + h * 0.055, d * 0.04), "dark")
         add("cannon", (w * 0.11, h * 0.060, d * 0.62),
             (w * 0.40, shoulder_y + h * 0.055, d * 0.30), "light")
+
+    elif shape.feature == "crown":
+        # BOSS「Liang」。6 米机位下细节全糊，能传出去的只有剪影，
+        # 所以记号全部做在轮廓上：头顶三齿冠 + 双肩塔尖，身上不贴任何装饰。
+        #
+        # 冠**从盔沿起算**而不是从头皮起算 —— 头本身只有 head_h，盔沿比它再高
+        # 2×0.0175h。从头皮起算的话，齿的下半截会埋进盔里，露出来的只剩一小截。
+        crest_base = head_y + head_h / 2 + h * 0.035
+        for i, (sx, tall) in enumerate(((-0.44, 0.62), (0.0, 1.0), (0.44, 0.62))):
+            tooth = h * 0.115 * tall
+            # 齿底下沉 8% 埋进盔沿，避免"浮在头顶上方"的那道缝。
+            # 中间那根最高，两侧对称降到 62% —— 三根粗齿的剪影比五根细齿
+            # 更能扛住 1280px 下的像素化（五齿版本实测糊成一块方板）。
+            add(f"crown_{i}", (head_w * 0.30, tooth, head_w * 0.34),
+                (sx * head_w, crest_base + tooth * 0.42, 0.0), "light")
+        # 肩塔：三层递减往外上方收。盒子是轴对齐的（`mesh_builder` 只吃轴对齐
+        # 盒子），做不了真正的斜角 —— 阶梯式收窄在 6 米机位下读起来一样。
+        for side, sx in (("l", -1.0), ("r", 1.0)):
+            for tier in range(3):
+                shrink = 1.0 - tier * 0.24
+                add(f"spike_{side}_{tier}",
+                    (w * 0.26 * shrink, h * 0.045, d * 0.32 * shrink),
+                    (sx * w * (0.50 + 0.05 * tier),
+                     shoulder_y + h * 0.065 + h * 0.042 * tier, 0.0),
+                    "light" if tier == 0 else "main")
+        # 胸口核心：全身上下唯一的自发光件（眼睛除外）。BOSS 的血量靠它做阶段提示，
+        # 也顺便让"哪个是 BOSS"在混战里有第二个线索，不只靠剪影。
+        add("core", (w * 0.30, h * 0.040, d * 0.04),
+            (0.0, torso_top - torso_h * 0.30, d * 0.245), "glow", lit=False)

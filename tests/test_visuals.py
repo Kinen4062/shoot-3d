@@ -775,21 +775,29 @@ def test_enemy_flash_is_one_uniform_and_goes_back_to_zero():
 
 
 def test_enemy_shapes_are_not_one_stretched_model():
-    """四种体型必须真的不一样，而不是同一套比例乘上 scale。
+    """每种体型必须真的不一样，而不是同一套比例乘上 scale。
 
     tank 的腿要短、runner 的腿要长。如果哪天有人把它们合并成一套零件表，
-    这条会立刻失败 —— 那种回归在画面上表现为"四种敌人都长得一样"，
+    这条会立刻失败 —— 那种回归在画面上表现为"敌人全都长得一样"，
     但不会有任何报错。
+
+    BOSS 的腿也被设成重甲的短腿（比 tank 还短一点，因为它最高、最重）。
+    所以这里断言的是"基础四种里 tank 最短"，BOSS 单独断言 —— 否则加一个
+    重甲类型就会误报。
     """
     from src.entities import enemy_body
 
     legs = {name: shape.leg for name, shape in enemy_body.SHAPES.items()}
     features = {name: shape.feature for name, shape in enemy_body.SHAPES.items()}
+    # 基础四种：既要拉开差距，又各自是极值。
+    basic = {k: v for k, v in legs.items() if k != "liang"}
 
-    assert max(legs.values()) - min(legs.values()) > 0.10, "腿长比例要拉得开"
-    assert legs["runner"] == max(legs.values()), "runner 应该腿最长"
-    assert legs["tank"] == min(legs.values()), "tank 应该腿最短"
-    assert len(set(features.values())) == 4, "四种的发光记号不能重复"
+    assert max(basic.values()) - min(basic.values()) > 0.10, "腿长比例要拉得开"
+    assert basic["runner"] == max(basic.values()), "runner 应该腿最长"
+    assert basic["tank"] == min(basic.values()), "tank 应该腿最短"
+    assert legs["liang"] <= basic["tank"], "BOSS 也是重甲，腿不该比 tank 长"
+    # 记号不能撞车：撞了就等于两只敌人共用同一套辨识特征。
+    assert len(set(features.values())) == len(features), "各类型的记号不能重复"
 
 
 # ---------------------------------------------------------------- 窗口图标

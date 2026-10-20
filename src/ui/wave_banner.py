@@ -2,17 +2,25 @@
 
 M3 的玩法验收需要「玩家能看出波次在推进」，正式的 HUD 在 M5，
 这里先放一个最小可用的提示条，避免验证时只能靠控制台输出。
+
+**为什么要认识状态**：横幅是按真实时间淡出的（1.8 秒显示 + 0.6 秒淡出）。
+第 30 波清完时 `WAVE CLEARED` 刚亮起来，画面同一帧就切到了通关面板 ——
+不主动收掉的话，它会压在面板上方整整两秒，和面板标题的 `RUN CLEARED`
+并排出现两个"cleared"，看起来像重复报错。
 """
 from __future__ import annotations
 
 from ursina import Text, color, window
+
+from src.core.game_state import State
 
 SHOW_TIME = 1.8
 FADE_TIME = 0.6
 
 
 class WaveBanner:
-    def __init__(self) -> None:
+    def __init__(self, state=None) -> None:
+        self.state = state
         self.text = Text(
             text="",
             origin=(0, 0),
@@ -42,6 +50,14 @@ class WaveBanner:
         self._left = SHOW_TIME
 
     def update(self, dt: float) -> None:
+        # 只在"看得见 3D 画面"的两个状态里显示。注意是**主动清掉**而不是暂停
+        # 倒计时：暂停时把横幅留着没问题（暂停面板会盖住），
+        # 但通关 / 死亡时它会压在结算面板上。
+        if self.state is not None and not self.state.in_state(State.PLAYING, State.PAUSED):
+            if self.text.text:
+                self.text.text = ""
+            self._left = 0.0
+            return
         if self._left <= 0.0:
             return
         self._left -= dt

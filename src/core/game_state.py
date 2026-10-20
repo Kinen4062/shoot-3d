@@ -25,10 +25,17 @@ class State(Enum):
     MENU = "MENU"
     PLAYING = "PLAYING"
     PAUSED = "PAUSED"
+    # 打完第 30 波（或打完 BOSS）后的"结算中"。
+    #
+    # 为什么不能借 GAME_OVER：`RunSession.on_state_changed` 用
+    # `not player.alive` 判断该不该重开，而通关时玩家**还活着** ——
+    # 借 GAME_OVER 会让"进入 BOSS 层"这条路走成"重开一局"。
+    # 也不能借 PAUSED：暂停面板会同时弹出来，而且 ESC 会把它切回 PLAYING。
+    CLEARED = "CLEARED"
     GAME_OVER = "GAME_OVER"
 
 
-_ORDER = (State.MENU, State.PLAYING, State.PAUSED, State.GAME_OVER)
+_ORDER = (State.MENU, State.PLAYING, State.PAUSED, State.CLEARED, State.GAME_OVER)
 
 
 class GameStateMachine:
@@ -62,6 +69,11 @@ class GameStateMachine:
         elif s is State.PAUSED:
             self.clock.paused = True
             mouse.locked = False
+        elif s is State.CLEARED:
+            # 冻住世界再看结算面板。不暂停的话，玩家在面板上点"进入 BOSS 层"的
+            # 那几秒里敌人 AI 和计分的生存时间还在跑 —— 他一边读结算一边掉血。
+            self.clock.paused = True
+            mouse.locked = False      # 面板上的按钮要能点
         elif s is State.MENU:
             self.clock.paused = False
             self.clock.time_scale = 1.0
@@ -72,6 +84,10 @@ class GameStateMachine:
 
     def _on_exit(self, s: State) -> None:
         if s is State.PAUSED:
+            self.clock.paused = False
+        elif s is State.CLEARED:
+            # 进 BOSS 层 = CLEARED → PLAYING。忘了这行，世界会永久静止，
+            # 表现是"点了按钮、面板消失了、但什么都不动"。
             self.clock.paused = False
         elif s is State.GAME_OVER:
             self.clock.time_scale = 1.0
@@ -84,7 +100,11 @@ class GameStateMachine:
             self.set(State.PLAYING)
 
     def debug_cycle(self) -> None:
-        """M0 验收用：MENU -> PLAYING -> PAUSED -> GAME_OVER -> MENU 循环。"""
+        """M0 验收用：MENU -> PLAYING -> PAUSED -> CLEARED -> GAME_OVER -> MENU。
+
+        加上 CLEARED 是为了能在不做完 30 波的前提下直接验通关面板：
+        手打 30 波要二十多分钟，改动结算界面不可能每次都那么验。
+        """
         idx = _ORDER.index(self._state)  # type: ignore[arg-type]
         self.set(_ORDER[(idx + 1) % len(_ORDER)])
 
