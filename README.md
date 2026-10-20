@@ -1,5 +1,7 @@
 # MINI TPS
 
+[![CI](https://github.com/Kinen4062/shoot-3d/actions/workflows/ci.yml/badge.svg)](https://github.com/Kinen4062/shoot-3d/actions/workflows/ci.yml)
+
 一个用 Ursina 写的迷你第三人称射击游戏。目标是**做完整、能玩、能打包**，
 不是做多。
 
