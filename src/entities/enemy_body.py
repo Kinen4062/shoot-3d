@@ -19,6 +19,17 @@ runner 的头会被纵向拉长 —— 这正是"一个模型打四个人"最典
 
 颜色照旧由 `data.color_rgb` 派生，所以红/黄/紫的阵营关系没变。
 
+一次绘制画完一只敌人
+--------------------
+M6 时每只敌人是 18~20 个独立 Entity，也就是 18~20 次 draw call。
+30 只同屏就是 600 次 —— 实测（`tools/_probe_cost.py`）满编场景 853 次调用里，
+有 599 次是敌人贡献的，而它们的顶点加起来只有 3.7 万个。
+
+现在整只敌人烘焙成一个带顶点色的 mesh（`core/mesh_builder.box_batch`）：
+**零件表还在，只是不再各建一个实体**，所以外观、比例、白模导出全都不受影响。
+发光件（眼条、胸灯）靠顶点色 alpha=1 在着色器里跳过光照，不再需要"不挂着色器"
+这种按零件区分的做法。
+
 坐标约定（改任何数字之前先读）
 ------------------------------
 * 单位是**米**。原点在身体中心：脚底 `y = -h/2`，头顶 `y = +h/2`。
@@ -30,9 +41,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ursina import Entity, color
+from ursina import Entity
 
-from src.core import config, lighting
+from src.core import config, lighting, mesh_builder
+from src.core.mesh_builder import BoxPart as Part
 
 
 @dataclass(frozen=True)
@@ -79,10 +91,9 @@ DEFAULT_SHAPE = SHAPES["grunt"]
 @dataclass
 class Body:
     rig: Entity
-    eye: Entity | None
-    # 每个零件 + 它**本来**的颜色。受击闪白要逐个改，恢复时必须各自复原 ——
-    # 统一涂回一个颜色的话，装甲的分层会当场消失（见 Enemy._set_flash）。
-    parts: list[tuple[Entity, tuple[int, int, int]]] = field(default_factory=list)
+    shell: Entity | None = None
+    eye: Part | None = None
+    parts: list[Part] = field(default_factory=list)
 
 
 def palette(rgb: tuple[int, int, int]) -> dict[str, tuple[int, int, int]]:
@@ -101,20 +112,6 @@ def unit_scale(parent_scale) -> tuple[float, float, float]:
     return tuple(1.0 / s if abs(s) > 1e-6 else 1.0 for s in parent_scale)
 
 
-def _part(rig: Entity, name: str, size, center, rgb, lit: bool = True) -> Entity:
-    entity = Entity(
-        parent=rig,
-        model="cube",
-        color=color.rgb32(*rgb),
-        scale=size,
-        position=center,
-        name=name,
-    )
-    if lit:
-        lighting.apply_lit(entity)
-    return entity
-
-
 def build(parent: Entity, kind: str, size, rgb: tuple[int, int, int]) -> Body:
     """在 parent 下搭出外观，返回 Body。
 
@@ -130,12 +127,15 @@ def build(parent: Entity, kind: str, size, rgb: tuple[int, int, int]) -> Body:
         scale=unit_scale((parent.scale_x, parent.scale_y, parent.scale_z)),
         name="enemy_body",
     )
-    body = Body(rig=rig, eye=None)
+    body = Body(rig=rig)
+    boxes: list = []
 
-    def add(name, size_, center, key, lit=True) -> Entity:
-        entity = _part(rig, name, size_, center, pen[key], lit)
-        body.parts.append((entity, pen[key]))
-        return entity
+    def add(name, size_, center, key, lit=True) -> Part:
+        part = Part(name, tuple(size_), tuple(center), pen[key], emissive=not lit)
+        body.parts.append(part)
+        # 不自发光 → alpha 0（正常受光）；自发光 → alpha 1（着色器跳过光照）
+        boxes.append((size_, center, mesh_builder.rgba(pen[key], 0.0 if lit else 1.0)))
+        return part
 
     # ---- 腿：脚 -> 腿 -> 髋 ----
     foot_h = h * shape.foot
@@ -186,18 +186,25 @@ def build(parent: Entity, kind: str, size, rgb: tuple[int, int, int]) -> Body:
         (0.0, torso_top + neck_h + head_h + h * 0.0175, 0.0), "light")
 
     # ---- 眼：唯一的朝向标识 ----
-    # 不挂着色器。要的就是"自己会亮"的平涂感，被光照压暗就不像发光了。
+    # 自发光：顶点色 alpha=1，着色器跳过光照。要的就是"自己会亮"的平涂感。
     eye_w = head_w * shape.eye[0]
     eye_h = head_h * shape.eye[1]
-    body.eye = _part(
-        rig, "enemy_eye", (eye_w, eye_h, d * 0.035),
+    body.eye = add(
+        "enemy_eye", (eye_w, eye_h, d * 0.035),
         (0.0, head_y + head_h * 0.06, head_d / 2 + d * 0.005),
-        pen["glow"], lit=False,
+        "glow", lit=False,
     )
-    body.parts.append((body.eye, pen["glow"]))
 
     _add_feature(body, shape, pen, add, w, h, d,
                  torso_top, torso_h, hip_y, leg_h, foot_h, shoulder_y, head_w)
+
+    # ---- 烘焙成一个 mesh：一只敌人 = 一次绘制 ----
+    body.shell = Entity(
+        parent=rig,
+        model=mesh_builder.box_batch(boxes, "enemy_shell"),
+        name="enemy_shell",
+    )
+    lighting.apply_vcolor_lit(body.shell)
     return body
 
 

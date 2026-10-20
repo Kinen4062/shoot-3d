@@ -8,13 +8,23 @@
 从背面看地面就是一片虚空。用 cube 而不是 plane，是为了拿到规整的盒体碰撞，
 顶面正好在 y=0，玩家脚底贴地。
 
-M6 的观感改动（第 8 条）：
-- 墙和柱子挂上 `lighting.apply_lit`，四个侧面从此有明暗差（之前是全平涂）；
-- 柱子顶端加一块浅色"盖板"，让柱子的高度和轮廓在远景里也读得出来；
-- 地面铺 2 米网格贴图。**地面故意不挂光照着色器** —— 它靠 `texture_scale`
-  平铺，而自定义着色器读不到 Panda 的纹理矩阵，网格会缩成一小块
-  （详见 `core/lighting.py` 开头第 1 个坑）。地板是水平面，本来就只有一个面，
-  光照对它没有意义，用默认着色器正好。
+渲染：36 个盒子合并成一次绘制
+------------------------------
+M6 的做法是墙面/压条/柱子/盖板各建一个 Entity —— 视觉上没问题，但那是
+**36 次 draw call**，而它们的顶点加起来不到 900 个。2026-10-20 的实测画像
+（`tools/_probe_cost.py`）里，空场景 254 次调用有 36 次花在这上面。
+
+现在把 36 个盒子烘焙成一个带顶点色的 mesh（`core/mesh_builder.box_batch`），
+只画一次。颜色差异（每根柱子 ±6 的色调、盖板比柱身亮）全部走顶点色，
+所以看起来和合并前一模一样。
+
+**碰撞一点没省**：视觉合并了，但墙和柱子仍然各有一个**不可见**的碰撞代理
+（`visible=False`，不产生任何绘制）。没这么做的话，射线会打在一个覆盖全场
+的巨型盒子上 —— 子弹飞到半空就"命中"了，柱子也挡不住视线。
+
+地面单独留着，不参与合并：它靠 `texture_scale` 平铺网格贴图，而自定义着色器
+读不到 Panda 的纹理矩阵（详见 `core/lighting.py` 开头第 1 个坑）。地板本来就
+只有一个朝向，用默认着色器正好。
 """
 from __future__ import annotations
 
@@ -23,7 +33,7 @@ import random
 
 from ursina import Entity, Texture, color
 
-from src.core import config, lighting
+from src.core import config, lighting, mesh_builder
 
 
 class Arena:
@@ -54,26 +64,24 @@ class Arena:
             name="ground",
         )
 
-        wall_color = color.rgb32(68, 74, 88)
+        # ---- 要合并进同一个 mesh 的盒子：(尺寸, 中心, 顶点色) ----
+        boxes: list[tuple[tuple[float, float, float], tuple[float, float, float], tuple]] = []
+
+        wall_rgb = (68, 74, 88)
         wall_h = config.WALL_HEIGHT
         wall_t = config.WALL_THICKNESS
-        self.walls = [
-            Entity(model="cube", color=wall_color, collider="box", name="wall_n",
-                   scale=(size, wall_h, wall_t), position=(0, wall_h / 2, self.half)),
-            Entity(model="cube", color=wall_color, collider="box", name="wall_s",
-                   scale=(size, wall_h, wall_t), position=(0, wall_h / 2, -self.half)),
-            Entity(model="cube", color=wall_color, collider="box", name="wall_e",
-                   scale=(wall_t, wall_h, size), position=(self.half, wall_h / 2, 0)),
-            Entity(model="cube", color=wall_color, collider="box", name="wall_w",
-                   scale=(wall_t, wall_h, size), position=(-self.half, wall_h / 2, 0)),
-        ]
-        for wall in self.walls:
-            lighting.apply_lit(wall)
+        wall_specs = (
+            ("wall_n", (size, wall_h, wall_t), (0, wall_h / 2, self.half)),
+            ("wall_s", (size, wall_h, wall_t), (0, wall_h / 2, -self.half)),
+            ("wall_e", (wall_t, wall_h, size), (self.half, wall_h / 2, 0)),
+            ("wall_w", (wall_t, wall_h, size), (-self.half, wall_h / 2, 0)),
+        )
+        for name, scale, position in wall_specs:
+            boxes.append((scale, position, mesh_builder.rgba(wall_rgb)))
 
         # 墙顶压条：一条 0.12 米高的浅色带子。没有它，墙和背景几乎同色，
         # 远处"哪儿是墙"只能靠轮廓猜。
-        self.trims = []
-        trim_color = color.rgb32(104, 112, 130)
+        trim_rgb = (104, 112, 130)
         trim_h = 0.12
         for scale, position in (
             ((size, trim_h, wall_t), (0, wall_h + trim_h / 2, self.half)),
@@ -81,17 +89,17 @@ class Arena:
             ((wall_t, trim_h, size), (self.half, wall_h + trim_h / 2, 0)),
             ((wall_t, trim_h, size), (-self.half, wall_h + trim_h / 2, 0)),
         ):
-            self.trims.append(lighting.apply_lit(Entity(
-                model="cube", color=trim_color, scale=scale, position=position,
-                name="wall_trim",
-            )))
+            boxes.append((scale, position, mesh_builder.rgba(trim_rgb)))
 
-        self.pillars: list[Entity] = []
-        self.caps: list[Entity] = []
-        rng = random.Random(20261017)   # 固定种子：每次开局布局一致，方便对照调试
+        # 柱子。固定种子：每次开局布局一致，方便对照调试。
+        rng = random.Random(20261017)
         # 亮度扰动用**独立的**随机流。写在主 rng 里会多消耗一次抽样，
         # 后面所有柱子的位置都会跟着挪 —— 纯外观改动不该改变可玩布局。
         tone_rng = random.Random(20261018)
+        # (x, z, 半径)。碰撞代理和 spaw/推开逻辑都用这份数据，
+        # 不再从实体上反查 scale —— 合并之后没有"每根柱子一个实体"了。
+        self.pillar_boxes: list[tuple[float, float, float]] = []
+        pillar_specs: list[tuple[tuple, tuple, tuple]] = []
         for _ in range(14):
             x = rng.uniform(-self.half + 4, self.half - 4)
             z = rng.uniform(-self.half + 4, self.half - 4)
@@ -103,26 +111,53 @@ class Arena:
             # 每根柱子亮度略有不同（±6）。完全同色时一排柱子像贴了一张图，
             # 这个差别小到说不出原因，但"一眼看过去有远近了"。
             tone = tone_rng.randint(-6, 6)
-            self.pillars.append(lighting.apply_lit(Entity(
-                model="cube",
-                color=color.rgb32(82 + tone, 86 + tone, 100 + tone),
-                collider="box",
-                scale=(w, h, d),
-                position=(x, h / 2, z),
-                name="pillar",
-            )))
+            pillar_specs.append((
+                (w, h, d), (x, h / 2, z),
+                mesh_builder.rgba((82 + tone, 86 + tone, 100 + tone)),
+            ))
             cap_h = 0.14
-            self.caps.append(lighting.apply_lit(Entity(
-                model="cube",
-                color=color.rgb32(108 + tone, 114 + tone, 132 + tone),
-                scale=(w + 0.08, cap_h, d + 0.08),
-                position=(x, h + cap_h / 2, z),
-                name="pillar_cap",
-            )))
+            boxes.append((
+                (w + 0.08, cap_h, d + 0.08), (x, h + cap_h / 2, z),
+                mesh_builder.rgba((108 + tone, 114 + tone, 132 + tone)),
+            ))
+            self.pillar_boxes.append((x, z, max(w, d) * 0.5))
+        boxes.extend(pillar_specs)
 
-        # 相机碰撞只认真正挡视线的实体。盖板和压条不加进来：
+        # ---- 一次绘制画完所有静态几何 ----
+        self.static = Entity(
+            model=mesh_builder.box_batch(boxes, "arena_static"),
+            name="arena_static",
+            # 这里**绝对不能**加 collider：它覆盖整个场地，
+            # 一发子弹会在半空"命中"这个巨型外壳。
+        )
+        lighting.apply_vcolor_lit(self.static)
+
+        # ---- 碰撞代理：不可见，不产生绘制，但射线/相机照样撞得到 ----
+        self.walls = [self._collider_proxy(name, scale, position)
+                      for name, scale, position in wall_specs]
+        self.pillars = [self._collider_proxy("pillar", size3, center3)
+                        for size3, center3, _rgba in pillar_specs]
+
+        # 相机碰撞只认真正挡视线的实体。盖板和压条不参与合并后的碰撞：
         # 它们贴在顶部，把镜头挡在半空反而更奇怪。
         self.solids = [*self.walls, *self.pillars]
+
+    @staticmethod
+    def _collider_proxy(name: str, scale, position) -> Entity:
+        """一个只有碰撞、不渲染的盒子。
+
+        `visible=False` 走的是 `NodePath.hide()`，只影响剔除，不影响
+        Panda 的碰撞遍历 —— 所以不可见但打得到。这也是为什么它不会
+        增加 draw call（隐藏节点在 cull 阶段就被丢了）。
+        """
+        return Entity(
+            model="cube",
+            scale=scale,
+            position=position,
+            collider="box",
+            name=name,
+            visible=False,
+        )
 
     def clamp(self, entity: Entity, margin: float | None = None) -> None:
         """把实体限制在场地内。没有这一步，玩家会一路跑到虚空里。
@@ -147,11 +182,10 @@ class Arena:
         统一用 PLAYER_RADIUS 会让坦克半个身子插进柱子里。
         """
         r = config.PLAYER_RADIUS if radius is None else radius
-        for p in self.pillars:
-            pr = max(p.scale_x, p.scale_z) * 0.5
+        for px, pz, pr in self.pillar_boxes:
             min_d = pr + r
-            dx = entity.x - p.x
-            dz = entity.z - p.z
+            dx = entity.x - px
+            dz = entity.z - pz
             d2 = dx * dx + dz * dz
             if d2 >= min_d * min_d or d2 < 1e-8:
                 continue

@@ -101,8 +101,8 @@ player.visible = True
 
 print("[ok] 四张图在", OUT)
 print("     grid texture =", world["arena"].ground.texture)
-print("     pillar lit   =", arena.pillars[0].shader is not None,
-      " wall lit =", arena.walls[0].shader is not None)
+print("     static lit   =", arena.static.shader is not None,
+      " 碰撞代理 =", len(arena.solids))
 print("     ground lit   =", arena.ground.shader is not None)
 print("     player parts =", len(player.body.children))
 for kind, enemy in zip(order, squad):

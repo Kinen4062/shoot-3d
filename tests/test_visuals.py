@@ -16,7 +16,8 @@ import pytest
 from panda3d.core import LPoint3
 from ursina import Entity, color
 
-from src.core import config, lighting
+from src.core import config, lighting, mesh_builder
+from src.core.ray import raycast
 from src.entities import ground_shadow, player_body
 from src.entities.arena import Arena
 from src.entities.enemy import Enemy
@@ -126,7 +127,15 @@ def player():
 
 
 def test_body_has_all_parts(player):
-    assert len(player.body.children) == len(player_body.PARTS) >= 20
+    """36 个零件必须全在合并 mesh 里。
+
+    合并之后 `body.children` 只剩 1 个 shell，所以改数顶点：
+    每个盒子 24 个顶点，少一个零件就少 24 个。
+    """
+    assert len(player_body.PARTS) >= 20
+    assert len(player.body.children) == 1, "外观应该只有一个可见实体"
+    assert (len(player.body.shell.model.vertices)
+            == len(player_body.PARTS) * mesh_builder.VERTS_PER_BOX)
 
 
 def test_parts_are_mirrored(player):
@@ -212,27 +221,37 @@ def test_player_entity_is_now_only_a_collider(player):
     assert math.isclose(size.z * player.scale_z, config.PLAYER_WIDTH, abs_tol=1e-3)
 
 
-def test_glow_parts_are_not_lit(player):
-    """面罩/灯条要"自己会亮"，不能被光照压暗。"""
-    by_name = {name: key for name, _, _, key in player_body.PARTS}
-    for part in player.body.children:
-        key = by_name[part.name]
-        if key in player_body.GLOW_KEYS:
-            assert part.shader is not lighting.lit_shader, f"{part.name} 不该挂光照"
-        else:
-            assert part.shader is lighting.lit_shader, f"{part.name} 应该挂光照"
+def test_glow_parts_are_marked_emissive(player):
+    """面罩/灯条要"自己会亮"：靠顶点色 alpha=1 让着色器跳过光照。
+
+    合并前这是"发光件不挂 lit_shader"，合并后整只模型只有一个着色器，
+    所以改用 alpha 通道表达。写错的后果是面罩被面亮度乘暗，
+    看起来和普通装甲一样 —— 朝向标识就没了。
+    """
+    assert player.body.shell.shader is lighting.vcolor_lit_shader
+
+    glow_parts = sum(1 for _, _, _, key in player_body.PARTS
+                     if key in player_body.GLOW_KEYS)
+    emissive_boxes = sum(1 for c in player.body.shell.model.colors if c[3] > 0.5)
+
+    assert glow_parts >= 2, "至少要有面罩和一个灯"
+    assert emissive_boxes == glow_parts * mesh_builder.VERTS_PER_BOX
 
 
 def test_visor_faces_forward(player):
-    """朝向标识必须在 +Z 面且够亮 —— 没有它，一个方块转不转看不出来。"""
-    visor = next(c for c in player.body.children if c.name == "visor")
-    assert visor.z > 0.1, "面罩得在脸的正前方"
+    """朝向标识必须在 +Z 面且够亮 —— 没有它，一个方块转不转看不出来。
 
-    def luminance(rgba):
-        return 0.21 * rgba[0] + 0.71 * rgba[1] + 0.07 * rgba[2]
+    合并之后面罩是零件数据里的一个盒子，所以读 `body.parts` 而不是子实体。
+    """
+    visor = next(p for p in player.body.parts if p.name == "visor")
+    assert visor.center[2] > 0.1, "面罩得在脸的正前方"
 
-    assert luminance(visor.color) > luminance(player.color) * 1.5, "面罩要比装甲亮得多"
-    assert visor.color[1] > 0.8, "面罩要偏青（绿通道高位）"
+    def luminance(rgb255):
+        return 0.21 * rgb255[0] + 0.71 * rgb255[1] + 0.07 * rgb255[2]
+
+    assert luminance(visor.rgb) > luminance(config.PLAYER_ARMOR_RGB) * 1.5, \
+        "面罩要比装甲亮得多"
+    assert visor.rgb[1] > 200, "面罩要偏青（绿通道高位）"
 
 
 # ---------------------------------------------------------------- 脚下阴影
@@ -270,48 +289,72 @@ def test_shadow_follows_player_and_hides_with_it(player):
 
 # ---------------------------------------------------------------- 场地与枪
 
-def test_ground_has_grid_texture_and_stays_unlit():
+@pytest.fixture
+def arena():
+    a = Arena()
+    yield a
+    from ursina import destroy
+    for entity in (a.ground, a.static, *a.solids):
+        destroy(entity)
+
+
+def test_ground_has_grid_texture_and_stays_unlit(arena):
     """地面必须**不挂**光照着色器。
 
     自定义着色器读不到 Panda 的纹理矩阵，`texture_scale` 会失效，
     整块地面只剩一张没平铺的贴图（看起来像地板中央糊了一块）。
     地板本来就只有一个朝向，本来也不需要光照。
     """
-    arena = Arena()
-    try:
-        assert arena.ground.texture, "地面贴图没加载上"
-        assert arena.ground.shader is not lighting.lit_shader
-        assert arena.ground.texture_scale[0] == pytest.approx(
-            config.ARENA_HALF * 2 / config.GROUND_GRID_CELL)
-    finally:
-        from ursina import destroy
-        for entity in [arena.ground, *arena.walls, *arena.pillars, *arena.trims, *arena.caps]:
-            destroy(entity)
+    assert arena.ground.texture, "地面贴图没加载上"
+    assert arena.ground.shader is not lighting.lit_shader
+    assert arena.ground.texture_scale[0] == pytest.approx(
+        config.ARENA_HALF * 2 / config.GROUND_GRID_CELL)
 
 
-def test_walls_and_pillars_are_lit():
-    arena = Arena()
-    try:
-        assert all(w.shader is lighting.lit_shader for w in arena.walls)
-        assert all(p.shader is lighting.lit_shader for p in arena.pillars)
-        assert len(arena.caps) == len(arena.pillars)
-    finally:
-        from ursina import destroy
-        for entity in [arena.ground, *arena.walls, *arena.pillars, *arena.trims, *arena.caps]:
-            destroy(entity)
+def test_static_scene_is_one_lit_mesh(arena):
+    """墙 / 压条 / 柱子 / 盖板必须合并成**一次**绘制。
+
+    M6 时它们是 36 个独立 Entity，也就是 36 次 draw call，而顶点加起来
+    不到 900 个。合并之后同一个画面只花 1 次调用 —— 这是 M7 性能优化
+    里最直接的一条，`tools/_probe_cost.py` 量得出来。
+
+    这条同时钉住三件事：顶点数没有漏盒子、颜色走的是顶点色（不是
+    `ColorScale`）、合并体**没有**碰撞（有的话子弹会在半空命中巨型外壳）。
+    """
+    boxes = 4 + 4 + len(arena.pillar_boxes) * 2      # 墙 + 压条 + (柱 + 盖板)
+    assert len(arena.static.model.vertices) == boxes * mesh_builder.VERTS_PER_BOX
+    assert len(arena.static.model.triangles) == boxes * mesh_builder.TRIS_PER_BOX * 3
+    assert arena.static.shader is lighting.vcolor_lit_shader
+    assert arena.static.collider is None, "合并体覆盖全场，挂碰撞会让子弹半空命中"
 
 
-def test_caps_and_trims_are_not_camera_obstacles():
-    """盖板/压条是纯装饰，不能进 `solids` —— 它们贴在半空，
-    让镜头撞上去只会出现"莫名其妙被拉近"。"""
-    arena = Arena()
-    try:
-        assert not set(map(id, arena.solids)) & set(map(id, arena.caps))
-        assert not set(map(id, arena.solids)) & set(map(id, arena.trims))
-    finally:
-        from ursina import destroy
-        for entity in [arena.ground, *arena.walls, *arena.pillars, *arena.trims, *arena.caps]:
-            destroy(entity)
+def test_collision_lives_on_invisible_proxies(arena):
+    """视觉合并了，碰撞必须一点不少地留在不可见代理上。
+
+    代理是 `visible=False` 的普通盒子：不产生绘制（cull 阶段就被丢掉），
+    但 Panda 的碰撞遍历照样打得到。盖板/压条**不**建代理 —— 它们贴在半空，
+    让镜头撞上去只会出现"莫名其妙被拉近"。
+    """
+    assert len(arena.solids) == 4 + len(arena.pillar_boxes)
+    assert {e.name for e in arena.solids} == {"wall_n", "wall_s", "wall_e", "wall_w", "pillar"}
+    assert all(e.collider is not None for e in arena.solids)
+    assert all(e.visible is False for e in arena.solids), "代理绝不能被画出来"
+
+
+def test_rays_still_hit_walls_and_pillars(arena):
+    """合并不影响命中：子弹和相机遮挡都靠这些代理。
+
+    墙的内表面在 27.5（墙中心 28，厚 1）。柱子的命中距离从外侧 2 米处
+    打过去，误差留 0.15 —— 柱身宽度不等，射线可能擦到侧面。
+    """
+    hit = raycast((0, 1.0, 0), (1, 0, 0), 100)
+    assert hit.entity is not None and hit.entity.name == "wall_e"
+    assert math.isclose(hit.distance, config.ARENA_HALF - config.WALL_THICKNESS / 2, abs_tol=1e-3)
+
+    x, z, r = arena.pillar_boxes[0]
+    pillar_hit = raycast((x + r + 2, 1.0, z), (-1, 0, 0), 10)
+    assert pillar_hit.entity is not None and pillar_hit.entity.name == "pillar"
+    assert pillar_hit.distance < 2.5
 
 
 def test_gun_has_silhouette_details():
@@ -336,15 +379,20 @@ def test_enemy_gets_eye_and_shadow():
     """
     enemy = Enemy(hp=10.0, position=(0, 0.9, 0))
     try:
-        assert enemy.eye.world_z > enemy.world_position.z + 0.1, "眼条要在正面（+Z）"
-        assert enemy.eye.color[1] > enemy.base_color[1], "眼睛要比身体亮"
+        # 坐标读 rig 内部的米制：眼条中心 z 应该在头的正面
+        assert enemy.eye.center[2] > 0.1, "眼条要在正面（+Z）"
+        assert enemy.eye.rgb[1] / 255 > enemy.base_color[1], "眼睛要比身体亮"
+        assert enemy.eye.emissive, "眼条必须标注成自发光，否则会被光照压暗"
 
         assert enemy.shadow is not None
 
-        # 光照挂在**零件**上（父实体已经没有模型了）。
-        # 发光件（眼条、胸灯、腿灯、炮管以外）故意不挂，所以留了 3 个余量。
-        lit = [p for p, _ in enemy.skin_parts if p.shader is lighting.lit_shader]
-        assert len(lit) >= len(enemy.skin_parts) - 3, "绝大多数零件要挂光照"
+        # 整只敌人只有一个可见实体，挂在顶点色光照上。
+        # 发光件靠顶点 alpha=1 跳过光照，所以数发光顶点就知道标对没有。
+        assert enemy.body.shell.shader is lighting.vcolor_lit_shader
+        emissive_boxes = sum(1 for c in enemy.body.shell.model.colors if c[3] > 0.5)
+        glow_parts = sum(1 for p in enemy.skin_parts if p.emissive)
+        assert glow_parts >= 1
+        assert emissive_boxes == glow_parts * mesh_builder.VERTS_PER_BOX
     finally:
         from ursina import destroy
         destroy(enemy)
@@ -364,8 +412,8 @@ def test_enemy_eye_color_tracks_body_color():
     red = Enemy(hp=10.0, position=(0, 0.9, 0), color_rgb=(220, 70, 60))
     blue = Enemy(hp=10.0, position=(0, 0.9, 0), color_rgb=(70, 120, 220))
     try:
-        assert red.eye.color[0] > red.eye.color[2]
-        assert blue.eye.color[2] > blue.eye.color[0]
+        assert red.eye.rgb[0] > red.eye.rgb[2]
+        assert blue.eye.rgb[2] > blue.eye.rgb[0]
     finally:
         from ursina import destroy
         destroy(red)
@@ -663,8 +711,9 @@ def test_enemy_body_fits_its_hitbox():
     squad = _squad()
     try:
         for kind, data, enemy in squad:
-            top = max(p.world_y + p.scale_y / 2 for p, _ in enemy.skin_parts)
-            bottom = min(p.world_y - p.scale_y / 2 for p, _ in enemy.skin_parts)
+            # 零件数据是 rig 内部的米制，换算回世界要加上宿主的 y
+            top = enemy.world_y + max(p.top for p in enemy.skin_parts)
+            bottom = enemy.world_y + min(p.bottom for p in enemy.skin_parts)
             height = data.scale[1]
 
             assert abs(bottom) < 0.05, f"{kind} 的脚没贴地（{bottom:+.3f}）"
@@ -695,30 +744,32 @@ def test_enemy_rig_cancels_parent_scale():
             destroy(enemy)
 
 
-def test_enemy_flash_restores_each_parts_own_color():
-    """受击闪白要把每个零件都点亮，恢复时**各自复原**。
+def test_enemy_flash_is_one_uniform_and_goes_back_to_zero():
+    """受击闪白必须是一个 uniform，而且**必须能回到 0**。
 
-    最省事的写法是恢复时统一涂回 `base_color` —— 那会把装甲的明暗分层
-    一次性抹平，敌人变成一块纯色板。这条测试就是防那个写法的。
+    合并之后零件没有独立节点，能改的只有 shell 的 `flash` 输入。
+    M6 时这里是"逐个零件改色、恢复时各自涂回原色"—— 那一圈最容易漏零件，
+    表现是"打完怪身上有一块永远白着"。现在只有一个数，漏不掉。
+
+    这条同时守住"装甲分层不会丢"：颜色全在顶点里，闪白只是着色器里
+    往白色插值，恢复后顶点色原样还在。
     """
     from ursina import destroy
 
-    enemy = Enemy(hp=999.0, position=(0, 0.9, 0),
-                  data=_enemy_data("grunt"))
+    enemy = Enemy(hp=999.0, position=(0, 0.9, 0), data=_enemy_data("grunt"))
+    shell = enemy.body.shell
     try:
-        before = [tuple(part.color) for part, _ in enemy.skin_parts]
-        assert len(set(before)) >= 4, "装甲要有分层，否则这条测不出东西"
+        assert float(shell.get_shader_input("flash")) == 0.0, "初始化就该是 0"
+
+        # 顶点色本身要有分层，否则"恢复后颜色丢失"这条根本测不出来
+        distinct = {tuple(c[:3]) for c in shell.model.colors}
+        assert len(distinct) >= 4, "装甲要有分层"
 
         enemy.take_damage(1.0)
-        assert all(part.color[0] > 0.99 and part.color[1] > 0.99
-                   for part, _ in enemy.skin_parts), "受击时要整身变白"
+        assert float(shell.get_shader_input("flash")) == 1.0, "受击要整身穿白"
 
         enemy.update_visual(config.HIT_FLASH_TIME + 0.01)
-        after = [tuple(part.color) for part, _ in enemy.skin_parts]
-        for got, want in zip(after, before):
-            for g, w in zip(got, want):
-                assert math.isclose(g, w, abs_tol=1e-4), (
-                    f"恢复后颜色不对：{got} != {want}")
+        assert float(shell.get_shader_input("flash")) == 0.0, "闪完必须复原"
     finally:
         destroy(enemy)
 

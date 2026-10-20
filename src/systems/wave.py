@@ -252,7 +252,7 @@ class WaveSystem:
             self.enemies.player.z if self.enemies.player is not None else 0.0,
             self.rig.yaw,
             [(e.x, e.z) for e in self.enemies.enemies if e.alive],
-            [(p.x, p.z, max(p.scale_x, p.scale_z) * 0.5) for p in self.arena.pillars],
+            list(self.arena.pillar_boxes),
         )
         if point is None:
             self.skipped += 1

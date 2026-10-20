@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from ursina import Entity, Vec3, color
 
-from src.core import config, event_bus
+from src.core import config, event_bus, lighting
 from src.core.enemy_types import EnemyData
 from src.entities import enemy_body, ground_shadow
 from src.systems.enemy_ai import Brain
@@ -69,8 +69,8 @@ class Enemy(Entity):
         self._respawn = 0.0             # >0 表示等待重生
 
         # ---- M6 外观 ----
-        # `skin_parts` 是 [(零件, 它本来的颜色)]，受击闪白要靠它逐个改色。
-        # 不能只改父实体的 color —— 拼装外观的父实体已经摘掉模型了（见下）。
+        # 外观是「一个合并 mesh + 一份零件数据」。零件数据只给测试/调试看
+        # （包围盒、眼条朝向），运行时不再有十几个实体要维护。
         self.eye = None
         self.skin_parts: list = []
         self.body = None
@@ -107,13 +107,13 @@ class Enemy(Entity):
     def _set_flash(self, on: bool) -> None:
         """全身闪白 / 复原。
 
-        外观是十几个零件拼的，父实体没有模型，改 `self.color` 一点用都没有。
-        所以逐个零件改；复原时**各自复原自己的颜色** —— 统一涂回 `base_color`
-        的话，装甲的明暗分层会当场消失，敌人变成一块纯色板。
+        外观已经合并成**一个** mesh，所以闪白是一个着色器 uniform：
+        0 = 原色，1 = 纯白。M6 时这里是"遍历十几个零件逐个改色、恢复时再各自
+        涂回原色"—— 那一圈最容易漏零件，表现是"打完怪身上有一块永远白着"。
         """
         self.color = color.white if on else self.base_color
-        for part, base in self.skin_parts:
-            part.color = color.white if on else color.rgb32(*base)
+        if self.body is not None and self.body.shell is not None:
+            lighting.set_flash(self.body.shell, 1.0 if on else 0.0)
 
     def take_damage(self, amount: float) -> bool:
         """扣血。返回 True 表示这一击致死。"""

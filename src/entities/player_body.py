@@ -24,9 +24,9 @@ config 里放的是**会被别处引用的调色板**（面罩颜色要和准星
 """
 from __future__ import annotations
 
-from ursina import Entity, color
+from ursina import Entity
 
-from src.core import config, lighting
+from src.core import config, lighting, mesh_builder
 
 # 调色板键 -> 0~255 颜色。发光件（visor / accent）不挂光照着色器，
 # 保持"自发光"的平涂感；其余零件挂光照，才有明暗面。
@@ -125,11 +125,19 @@ def unit_scale(parent_scale) -> tuple[float, float, float]:
 
 
 def build_body(parent: Entity) -> Entity:
-    """在 parent 下搭出整套外观，返回 rig（子实体都挂在它下面）。
+    """在 parent 下搭出整套外观，返回 rig。
 
     `config.PLAYER_MODEL` 填了路径就用自制模型，否则用下面那张零件表拼。
     两种方式共用同一个 rig —— rig 负责把宿主的非等比缩放抵消掉，
     所以自制模型也必须是「1 单位 = 1 米、原点在身体中心」。
+
+    拼装模式下 36 个零件会烘焙成**一个** mesh（`core/mesh_builder`），
+    挂在 rig 下。36 个独立 Entity 就是 36 次 draw call，而它们加起来
+    只有 864 个顶点 —— 合并之后的画面和合并前逐像素一致。
+
+    rig 上额外挂两个属性给测试/调试用：
+    `rig.shell`（合并后的实体，`PLAYER_MODEL` 模式下是 None）、
+    `rig.parts`（零件数据，不是实体）。
     """
     rig = Entity(
         parent=parent,
@@ -143,19 +151,22 @@ def build_body(parent: Entity) -> Entity:
         # asset_folder 由 main.anchor_asset_folder() 锚到项目根 / _MEIPASS。
         Entity(parent=rig, model=config.PLAYER_MODEL,
                scale=config.PLAYER_MODEL_SCALE, name="player_model")
+        rig.shell = None
+        rig.parts = []
         return rig
 
-    for name, size, position, key in PARTS:
-        part = Entity(
-            parent=rig,
-            model="cube",
-            color=color.rgb32(*PALETTE[key]),
-            scale=size,
-            position=position,
-            name=name,
-        )
-        # 发光件不挂着色器：面罩要"自己会亮"，被光照压暗就不像发光了。
-        if key not in GLOW_KEYS:
-            lighting.apply_lit(part)
+    parts = [
+        mesh_builder.BoxPart(name, size, position, PALETTE[key], emissive=key in GLOW_KEYS)
+        for name, size, position, key in PARTS
+    ]
+    shell = Entity(
+        parent=rig,
+        model=mesh_builder.box_batch([part.as_box() for part in parts], "player_shell"),
+        name="player_shell",
+    )
+    # 发光件（面罩/领口灯）靠顶点色 alpha=1 跳过光照，不再需要"不挂着色器"。
+    lighting.apply_vcolor_lit(shell)
 
+    rig.shell = shell
+    rig.parts = parts
     return rig

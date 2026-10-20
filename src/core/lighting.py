@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 
+from panda3d.core import TransparencyAttrib
 from ursina import Shader
 
 from src.core import config
@@ -104,6 +105,84 @@ lit_shader = Shader(
     vertex=_VERTEX,
     fragment=_FRAGMENT,
 )
+
+
+# ---------------------------------------------------------------- 顶点色版本
+#
+# 合并几何之后，颜色不再是「每个实体一个 `p3d_ColorScale`」，而是每个顶点自带。
+# 所以这一版多两件事：
+#   1. 读顶点色 `p3d_Color`，alpha 当**自发光权重**（面罩/灯条不能被光照压暗）；
+#   2. 多一个 `flash` uniform，受击时整体向白色插值 —— 这就是原来
+#      「逐个零件改色再各自复原」做到的视觉效果，成本从 N 次赋值降到 1 次。
+#
+# **这个 shader 只能给带顶点色的 mesh 用**：没有 color 列时 `p3d_Color` 绑不上，
+# 轻则整块变黑，重则着色器链接失败（画面全糊）。所以它和 `lit_shader` 是两个
+# 独立的 Shader 对象，不能合并成一个。
+
+_VC_VERTEX = """
+#version 140
+
+uniform mat4 p3d_ModelViewProjectionMatrix;
+uniform mat4 p3d_ModelMatrix;
+
+in vec4 p3d_Vertex;
+in vec2 p3d_MultiTexCoord0;
+in vec3 p3d_Normal;
+in vec4 p3d_Color;
+
+out vec2 texcoord;
+out vec3 world_normal;
+out vec4 vcolor;
+
+void main() {
+    gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;
+    texcoord = p3d_MultiTexCoord0;
+    world_normal = normalize(mat3(p3d_ModelMatrix) * p3d_Normal);
+    vcolor = p3d_Color;
+}
+"""
+
+_VC_FRAGMENT = f"""
+#version 140
+
+uniform sampler2D p3d_Texture0;
+uniform vec4 p3d_ColorScale;
+uniform float flash;
+
+in vec2 texcoord;
+in vec3 world_normal;
+in vec4 vcolor;
+
+out vec4 fragColor;
+
+void main() {{
+    vec3 n = normalize(world_normal);
+    float key  = max(dot(n, normalize({_vec3(config.LIGHT_KEY_DIR)})), 0.0);
+    float fill = max(dot(n, normalize({_vec3(config.LIGHT_FILL_DIR)})), 0.0);
+    float shade = ({_f(config.LIGHT_AMBIENT)}
+                   + {_f(config.LIGHT_KEY_WEIGHT)} * key
+                   + {_f(config.LIGHT_FILL_WEIGHT)} * fill) * {_f(config.LIGHT_GAIN)};
+
+    // alpha = 自发光权重：1 的零件完全不受光照（面罩、灯条、眼睛）
+    float emissive = clamp(vcolor.a, 0.0, 1.0);
+    float light = mix(shade, 1.0, emissive);
+
+    // 受击闪白：整体向纯白插值。闪的是"整身"，不是某个零件。
+    vec3 base = mix(vcolor.rgb, vec3(1.0), clamp(flash, 0.0, 1.0));
+
+    vec4 tex = texture(p3d_Texture0, texcoord);
+    fragColor = vec4(tex.rgb * base * p3d_ColorScale.rgb * light,
+                     tex.a * p3d_ColorScale.a);
+}}
+"""
+
+vcolor_lit_shader = Shader(
+    name="wrap_light_vcolor_shader",
+    language=Shader.GLSL,
+    vertex=_VC_VERTEX,
+    fragment=_VC_FRAGMENT,
+)
+
 
 
 def shade_for_normal(nx: float, ny: float, nz: float) -> float:
@@ -195,3 +274,46 @@ def apply_lit(entity, fill_texture: bool = True):
     except Exception:      # pragma: no cover - 只在无 GL 的极端环境触发
         pass
     return entity
+
+
+def apply_vcolor_lit(entity, fill_texture: bool = True):
+    """给**带顶点色**的合并 mesh 挂光照（`mesh_builder.box_batch` 的产物）。
+
+    和 `apply_lit` 的区别：颜色来自顶点，且多一个 `flash` uniform。
+    同样会补一张纯白贴图 —— 着色器要采样 `p3d_Texture0`。
+    """
+    if not config.LIT_SHADER or entity is None:
+        return entity
+
+    try:
+        if fill_texture and not entity.texture:
+            entity.texture = _white_texture()
+        entity.shader = vcolor_lit_shader
+        # ursina 在 `model` setter 里给**所有**模型都设了 `M_dual`（半透明混合）。
+        # 合并 mesh 的顶点 alpha 是"自发光权重"、普通零件正好是 0，
+        # 于是 Panda 会把整块几何丢进透明队列：混合 + 排序错乱，
+        # 表现是柱子底部出现穿帮的横条、面与面互相透视。
+        # 这里强制不透明；alpha 只给着色器读，不参与混合。
+        entity.set_transparency(TransparencyAttrib.M_none)
+        # 显式给个 0：GL 里未设置的 uniform 默认就是 0，但探针/测试要读它，
+        # 有值才能区分"没闪"和"根本没设过"。
+        entity.set_shader_input("flash", 0.0)
+    except Exception:      # pragma: no cover
+        pass
+    return entity
+
+
+def set_flash(entity, amount: float) -> None:
+    """受击闪白。`amount` 0~1，1 = 整身纯白。
+
+    合并几何之前这里是"遍历每个零件改色、再各自复原"：
+    N 个零件就是 N 次 `entity.color = ...`，而且恢复时很容易漏掉某一个，
+    表现是"打完怪身上有一块永远白着"。现在只有一个 uniform。
+    """
+    if entity is None:
+        return
+    try:
+        entity.set_shader_input("flash", max(0.0, min(1.0, float(amount))))
+    except Exception:      # pragma: no cover
+        pass
+
