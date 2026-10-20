@@ -10,6 +10,8 @@ BoxCollider 挂在节点上会跟着 scale 走，所以出生时设一次就够�
 """
 from __future__ import annotations
 
+from typing import Any
+
 from ursina import Entity, Vec3, color
 
 from src.core import config, event_bus, lighting
@@ -31,6 +33,15 @@ def enemy_from(entity):
 
 
 class Enemy(Entity):
+    # ursina 的 `color` / `collider` 都没有类型标注。
+    #
+    # `base_color` 和 `color` 在 `_set_flash` 里互相赋值，不显式标注的话
+    # mypy 会绕着这两个名字推断一圈然后放弃（"Cannot determine type"）。
+    # `collider` 则是有意为之的两种值：活着是 BoxCollider 描述符（str），
+    # 死亡/回收时置 None —— 不标注会被推断成 `None`，`respawn` 再赋值就报错。
+    base_color: tuple
+    collider: Any
+
     def __init__(
         self,
         hp: float,

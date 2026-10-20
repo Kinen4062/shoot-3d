@@ -20,6 +20,9 @@ import json
 import os
 
 from src.core import config
+from src.core.log import get_logger
+
+log = get_logger("save")
 
 # 存档字段。加新字段时把默认值写在这里，sanitize 会自动补齐。
 DEFAULTS: dict[str, int] = {
@@ -70,7 +73,7 @@ def load_save(path: str | None = None) -> dict[str, int]:
     except FileNotFoundError:
         return default_save()
     except (OSError, ValueError) as exc:
-        print(f"[M4] 存档读取失败（{exc}），本次按默认值处理")
+        log.warning(f"[M4] 存档读取失败（{exc}），本次按默认值处理")
         return default_save()
 
 
@@ -87,7 +90,7 @@ def write_save(data: dict[str, int], path: str | None = None) -> bool:
         os.replace(tmp, target)
         return True
     except OSError as exc:
-        print(f"[M4] 存档写入失败（{exc}）")
+        log.error(f"[M4] 存档写入失败（{exc}）")
         # 半截的临时文件留着没有意义，能删就删掉，删不掉也不影响
         try:
             if os.path.exists(tmp):

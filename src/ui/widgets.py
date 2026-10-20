@@ -15,7 +15,7 @@ M5 的三个界面（主菜单 / 暂停 / 结算）如果各写一遍按钮，
 """
 from __future__ import annotations
 
-from ursina import Button, Entity, Text, camera, color
+from ursina import Button, Entity, Text, color
 
 # 配色。和游戏内的 HUD 用同一套，避免"菜单是蓝的、HUD 是灰的"。
 RGB_TEXT = (236, 241, 247)

@@ -22,6 +22,9 @@ from __future__ import annotations
 from ursina import application
 
 from src.core.game_state import State
+from src.core.log import get_logger
+
+log = get_logger("focus")
 
 
 def window_foreground():
@@ -62,7 +65,7 @@ class FocusWatch:
             self.unknown += 1
             if not self._logged_unknown:
                 self._logged_unknown = True
-                print("[M6] 拿不到窗口焦点状态，失焦暂停不生效（无窗口环境属正常）")
+                log.warning("[M6] 拿不到窗口焦点状态，失焦暂停不生效（无窗口环境属正常）")
             return
 
         if self._was_focused and not focused:

@@ -13,7 +13,6 @@ rebind(to_key, from_key) 的语义是「把 A 键别名到 B 键」，不接受 
 from __future__ import annotations
 
 import __main__
-
 from src.core.game_state import State
 
 # ---- 键名常量 ----
@@ -61,7 +60,7 @@ class InputMap:
 
     def install(self) -> None:
         # 注册到 __main__ 而不是 self：引擎查的是 __main__.input。
-        __main__.input = self._dispatch  # type: ignore[attr-defined]
+        __main__.input = self._dispatch
 
     def _dispatch(self, key: str) -> None:
         self.last_key = key

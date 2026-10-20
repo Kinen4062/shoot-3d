@@ -227,7 +227,7 @@ def test_state_changed_does_nothing_while_alive():
 
 
 def test_player_died_switches_to_game_over():
-    session, state, _player, _enemies = build()
+    _session, state, _player, _enemies = build()
     event_bus.emit("player_died")
     assert State.GAME_OVER in state.set_calls
 

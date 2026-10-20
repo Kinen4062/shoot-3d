@@ -22,14 +22,15 @@ from src.core.clock import GameClock
 from src.core.game_data import get_data
 from src.core.game_state import GameLoop, GameStateMachine, State
 from src.core.input_map import InputMap
+from src.core.log import get_logger
 from src.core.session import RunSession
 from src.entities.arena import Arena
 from src.entities.gun import Gun
 from src.entities.player import Player
 from src.systems.audio import AudioSystem
 from src.systems.camera_rig import CameraRig
-from src.systems.focus_watch import FocusWatch
 from src.systems.enemy_system import EnemySystem
+from src.systems.focus_watch import FocusWatch
 from src.systems.pickup_system import PickupSystem
 from src.systems.player_control import PlayerController
 from src.systems.projectile_system import ProjectileSystem
@@ -38,14 +39,16 @@ from src.systems.tracer import TracerSystem
 from src.systems.wave import WaveSystem
 from src.systems.weapon import WeaponSystem
 from src.ui.combat_hud import CombatHud
-from src.ui.score_popup import ScorePopup
 from src.ui.crosshair import Crosshair
 from src.ui.damage_flash import DamageFlash
 from src.ui.debug_overlay import DebugOverlay
 from src.ui.fps_counter import FpsCounter
 from src.ui.menus import ClearPanel, GameOverPanel, MainMenu, PauseMenu, quit_game
 from src.ui.score_hud import ScoreHud
+from src.ui.score_popup import ScorePopup
 from src.ui.wave_banner import WaveBanner
+
+log = get_logger("main")
 
 
 def window_icon() -> Filename:
@@ -161,6 +164,12 @@ def build_world() -> dict:
 
     # ---- M5：界面 ----
     # 按钮回调在这里注入，界面层不认识 session/state 之外的任何东西。
+    #
+    # 先声明 `session` 的名字：下面的面板要拿它的方法做回调，而 session
+    # 本身要等所有面板都造完才能构造（它要持有它们）。运行时靠 lambda
+    # 延迟求值绕开先后顺序，类型上则靠这一行裸标注 —— 没有它 mypy 会
+    # 在 lambda 里遇到一个"还没赋过值的名字"然后放弃推断。
+    session: RunSession
     game_over = GameOverPanel(
         on_restart=lambda: session.start_run(),
         on_menu=lambda: session.return_to_menu(),
@@ -236,9 +245,9 @@ def build_world() -> dict:
     # 开局就播（菜单里也该有音乐）。`start_bgm` 幂等，缺文件只返回 False 不抛异常。
     # 暂停/恢复由 `session.on_state_changed` 驱动，这里只负责"开始"。
     if audio.start_bgm():
-        print(f"[M6] bgm on  {config.BGM_FILE}")
+        log.info(f"[M6] bgm on  {config.BGM_FILE}")
     else:
-        print(f"[M6] bgm off  （state={audio.bgm_state}）")
+        log.warning(f"[M6] bgm off  （state={audio.bgm_state}）")
 
     # systems 的顺序就是执行顺序：
     # 玩家移动 -> 相机跟上 -> 用最新相机姿态结算射线 -> 敌人 AI/攻击
@@ -260,7 +269,7 @@ def build_world() -> dict:
     keys.install()
     overlay.input_map = keys
 
-    print(
+    log.info(
         f"[M5] state={game_state.state.name}  "
         f"logic_systems={len(loop.systems)}  ui_systems={len(loop.ui_systems)}  "
         f"types={list(enemies.types)}  waves={len(waves.table.waves)}  "

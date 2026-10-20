@@ -41,8 +41,7 @@ def _string_literals(path: Path):
 
 
 def _project_sources():
-    for path in sorted((ROOT / "src").rglob("*.py")):
-        yield path
+    yield from sorted((ROOT / "src").rglob("*.py"))
     yield ROOT / "main.py"
 
 

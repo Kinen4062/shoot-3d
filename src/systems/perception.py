@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import math
-from typing import Callable
+from collections.abc import Callable
 
 # 浮点比较的容差：视锥边界正好等于半角时应当算「看得见」，
 # 不留容差的话 60.0000001 与 60.0 的差别会让边界行为随机。
@@ -76,9 +76,7 @@ def can_see(dx: float, dz: float, yaw: float, view_range: float, half_angle: flo
     """
     if not within_view_cone(dx, dz, yaw, view_range, half_angle):
         return False
-    if blocked is not None and blocked():
-        return False
-    return True
+    return blocked is None or not blocked()
 
 
 class PerceiveThrottle:

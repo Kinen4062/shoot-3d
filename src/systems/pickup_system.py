@@ -28,7 +28,10 @@ from dataclasses import dataclass
 from ursina import Entity, color
 
 from src.core import config, event_bus
+from src.core.log import get_logger
 from src.core.pool import EntityPool
+
+log = get_logger("pickup")
 
 # 掉落权重表。想调"更常掉血包"就改这里，代码里没有第二个地方写权重。
 DROP_TABLE: tuple[tuple[str, int], ...] = (
@@ -43,11 +46,11 @@ KINDS: tuple[str, ...] = tuple(k for k, _ in DROP_TABLE)
 
 # 外形。cube / sphere 决定用哪个池，其余是 acquire 后要贴上去的属性。
 _LOOK: dict[str, dict] = {
-    "health": dict(shape="cube", rgb=(78, 220, 120), scale=0.34, alpha=1.0),
-    "ammo": dict(shape="cube", rgb=(241, 198, 62), scale=0.36, alpha=1.0),
-    "speed": dict(shape="sphere", rgb=(92, 160, 255), scale=0.34, alpha=1.0),
-    "gem": dict(shape="cube", rgb=(186, 108, 242), scale=0.30, alpha=1.0),
-    "shield": dict(shape="sphere", rgb=(92, 230, 230), scale=0.38, alpha=0.62),
+    "health": {"shape": "cube", "rgb": (78, 220, 120), "scale": 0.34, "alpha": 1.0},
+    "ammo": {"shape": "cube", "rgb": (241, 198, 62), "scale": 0.36, "alpha": 1.0},
+    "speed": {"shape": "sphere", "rgb": (92, 160, 255), "scale": 0.34, "alpha": 1.0},
+    "gem": {"shape": "cube", "rgb": (186, 108, 242), "scale": 0.30, "alpha": 1.0},
+    "shield": {"shape": "sphere", "rgb": (92, 230, 230), "scale": 0.38, "alpha": 0.62},
 }
 
 LABELS: dict[str, str] = {
@@ -118,7 +121,7 @@ def apply_pickup(kind: str, player, weapon) -> PickupResult:
     `player` / `weapon` 是鸭子类型，测试里塞 SimpleNamespace 即可。
     """
     if kind == "health":
-        healed = int(round(player.heal(config.HEALTH_PACK_AMOUNT)))
+        healed = round(player.heal(config.HEALTH_PACK_AMOUNT))
         return PickupResult(kind, healed, f"+{healed} HP")
     if kind == "ammo":
         added = int(weapon.refill_current())
@@ -166,7 +169,7 @@ class PickupSystem:
     def spawn(self, kind: str, x: float, z: float) -> Entity | None:
         look = _LOOK.get(kind)
         if look is None:
-            print(f"[M4] 未知道具类型 {kind!r}，跳过")
+            log.warning(f"[M4] 未知道具类型 {kind!r}，跳过")
             return None
 
         shape = look["shape"]

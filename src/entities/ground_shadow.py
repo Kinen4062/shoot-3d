@@ -52,7 +52,7 @@ def shadow_local_y(parent_scale_y: float) -> float:
 
 def attach(parent: Entity, radius: float, alpha: float) -> Entity:
     """在 parent 脚下挂一块阴影。alpha 是 0~1 的不透明度。"""
-    byte = max(0, min(255, int(round(alpha * 255))))
+    byte = max(0, min(255, round(alpha * 255)))
     scale_x, scale_y = shadow_scale(parent.scale_x, parent.scale_z, radius)
 
     return Entity(

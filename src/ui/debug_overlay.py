@@ -10,6 +10,8 @@ M5 加了主菜单和结算面板之后，这堆十几行的等宽文字会直�
 """
 from __future__ import annotations
 
+from typing import Any
+
 from ursina import Text, application, color, mouse, window
 
 from src.core import config
@@ -30,17 +32,20 @@ class DebugOverlay:
     def __init__(self, state: GameStateMachine, clock: GameClock) -> None:
         self.state = state
         self.clock = clock
-        self.loop = None
-        self.watch = None           # 指向玩家，用来显示实时坐标
-        self.rig = None             # 指向相机，用来显示贴墙时的拉近距离
-        self.weapon = None          # 指向武器系统，显示弹药/换弹状态
-        self.enemies = None         # 指向敌人系统，显示存活靶子数
-        self.waves = None           # 指向波次系统，显示波数与阶段
-        self.controller = None      # 指向玩家控制器，显示闪避冷却
-        self.score = None           # 指向计分系统，显示分数/连击/最高分
-        self.pickups = None         # 指向道具系统，显示场上道具数
-        self.audio = None           # 指向音效系统，显示播放/去重/缺文件计数
-        self.input_map = None       # 指向输入路由，显示最近一次按键
+        # 下面这组是"后挂的指针"：`main.build_world` 在系统全部构造完之后
+        # 才把它们塞进来。标注成 Any 是有意的 —— 覆盖层只读几个字段，
+        # 给每个系统写一遍精确类型只会制造一个互相导入的网。
+        self.loop: Any = None
+        self.watch: Any = None           # 指向玩家，用来显示实时坐标
+        self.rig: Any = None             # 指向相机，用来显示贴墙时的拉近距离
+        self.weapon: Any = None          # 指向武器系统，显示弹药/换弹状态
+        self.enemies: Any = None         # 指向敌人系统，显示存活靶子数
+        self.waves: Any = None           # 指向波次系统，显示波数与阶段
+        self.controller: Any = None      # 指向玩家控制器，显示闪避冷却
+        self.score: Any = None           # 指向计分系统，显示分数/连击/最高分
+        self.pickups: Any = None         # 指向道具系统，显示场上道具数
+        self.audio: Any = None           # 指向音效系统，显示播放/去重/缺文件计数
+        self.input_map: Any = None       # 指向输入路由，显示最近一次按键
         self._acc = config.DEBUG_REFRESH_INTERVAL   # 首帧就刷新一次
 
         # 订阅由 core/session.py 统一注册（重开会 clear_listeners）。

@@ -18,21 +18,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import ClassVar
 
 from ursina import Entity, application, camera
 
 from src.core import config
+from src.core.log import get_logger
 from src.ui.widgets import (
     RGB_ACCENT,
     RGB_DANGER,
     RGB_MUTED,
     RGB_TEXT,
-    card,
     backdrop,
     button,
+    card,
     label,
     rgba32,
 )
+
+log = get_logger("ui")
 
 
 def format_time(seconds: float) -> str:
@@ -272,7 +276,7 @@ class ClearPanel(_Panel):
     #
     # 真结局少一个按钮，**卡片必须跟着收一档**：不收的话藏起来的按钮会留一个
     # 0.08 的空洞，两张按钮被挤在卡片下半部分，看起来像"少画了一个按钮"。
-    _LAYOUT = {
+    _LAYOUT: ClassVar[dict[str, tuple[float, float | None, float, float]]] = {
         "run": (0.74, -0.130, -0.212, -0.294),
         "boss": (0.68, None, -0.150, -0.232),
     }
@@ -318,14 +322,15 @@ class ClearPanel(_Panel):
         if self._card is not None:
             self._card.scale = self._card_scale
 
-    def reset(self) -> None:
-        super().reset()
-        self.boss_button.visible = True
-
 
 __all__ = [
-    "RunSummary", "build_summary", "format_time",
-    "MainMenu", "PauseMenu", "GameOverPanel", "ClearPanel",
+    "ClearPanel",
+    "GameOverPanel",
+    "MainMenu",
+    "PauseMenu",
+    "RunSummary",
+    "build_summary",
+    "format_time",
 ]
 
 
@@ -335,5 +340,5 @@ def quit_game() -> None:
     单独包一层是为了在退出前留一条日志：窗口"闪一下就没了"的时候，
     至少能从控制台确认是玩家点的退出，而不是崩在某处。
     """
-    print("[M5] quit by menu")
+    log.info("[M5] quit by menu")
     application.quit()

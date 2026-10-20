@@ -16,7 +16,6 @@ from src.systems.wave import (
     speed_multiplier,
 )
 
-
 # ---------------------------------------------------------------- 配比
 
 def test_table_wave_is_used_verbatim():

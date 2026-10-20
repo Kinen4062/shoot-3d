@@ -13,15 +13,19 @@
 from __future__ import annotations
 
 import math
+from functools import partial
 
 from ursina import Vec3, destroy
 
 from src.core import config, event_bus
 from src.core.enemy_types import EnemyData, load_or_fallback
+from src.core.log import get_logger
 from src.core.ray import raycast
 from src.entities.enemy import Enemy, TargetDummy, spawn_enemy
 from src.systems.enemy_ai import BrainState, separation_push
 from src.systems.perception import PerceiveThrottle, can_see, turn_toward, yaw_to
+
+log = get_logger("enemies")
 
 
 class EnemySystem:
@@ -55,15 +59,13 @@ class EnemySystem:
                    yaw: float | None = None) -> Enemy | None:
         data = self.types.get(type_name)
         if data is None:
-            print(f"[M3] 未知敌人类型 {type_name!r}，跳过")
+            log.warning(f"[M3] 未知敌人类型 {type_name!r}，跳过")
             return None
         if yaw is None:
             # 默认朝玩家出生。默认 0（朝 +Z）会让整波怪背对场地中心，
             # 要等待机扫视转过来才发现玩家，看起来像 AI 坏了。
-            if self.player is not None:
-                yaw = yaw_to(self.player.x - x, self.player.z - z)
-            else:
-                yaw = 0.0
+            yaw = (yaw_to(self.player.x - x, self.player.z - z)
+                   if self.player is not None else 0.0)
         self.spawned_total += 1
         return self.add(spawn_enemy(type_name, data, x, z, hp_mult, speed_mult, yaw))
 
@@ -123,7 +125,7 @@ class EnemySystem:
             assert data is not None
             sees = can_see(
                 dx, dz, enemy.rotation_y, data.view_range, config.VIEW_HALF_ANGLE,
-                blocked=lambda enemy=enemy, dx=dx, dz=dz: self._blocked(enemy, px, py, pz, dx, dz),
+                blocked=partial(self._blocked, enemy, px, py, pz, dx, dz),
             )
             enemy.sees_player = sees
 

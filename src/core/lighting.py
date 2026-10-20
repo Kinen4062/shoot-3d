@@ -38,6 +38,7 @@ from ursina import Shader
 
 from src.core import config
 
+
 # 着色器源码里所有数字都来自 config，避免出现第二套魔法参数。
 # 唯一要小心的格式：必须是浮点字面量（`1` 在 GLSL 里是整型，`1 / 2` 会变成 0）。
 def _f(value: float) -> str:
@@ -214,13 +215,13 @@ def blend(a_rgb, b_rgb, t: float) -> tuple[int, int, int]:
     """两色线性插值，返回 0~255 整数。敌人眼睛的颜色就是从本体色往白里混出来的。"""
     t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
     return tuple(
-        int(round(a + (b - a) * t)) for a, b in zip(a_rgb, b_rgb)
+        round(a + (b - a) * t) for a, b in zip(a_rgb, b_rgb, strict=True)
     )
 
 
 def scale_rgb(rgb, k: float) -> tuple[int, int, int]:
     """整体提亮/压暗，自动夹到 0~255（int 超过 255 传给 rgb32 会溢出成乱码色）。"""
-    return tuple(max(0, min(255, int(round(c * k)))) for c in rgb)
+    return tuple(max(0, min(255, round(c * k))) for c in rgb)
 
 
 def _white_texture():
@@ -271,7 +272,7 @@ def apply_lit(entity, fill_texture: bool = True):
         if fill_texture and not entity.texture:
             entity.texture = _white_texture()
         entity.shader = lit_shader
-    except Exception:      # pragma: no cover - 只在无 GL 的极端环境触发
+    except Exception:      # noqa: BLE001 - 只在无 GL 的极端环境触发
         pass
     return entity
 
@@ -298,7 +299,7 @@ def apply_vcolor_lit(entity, fill_texture: bool = True):
         # 显式给个 0：GL 里未设置的 uniform 默认就是 0，但探针/测试要读它，
         # 有值才能区分"没闪"和"根本没设过"。
         entity.set_shader_input("flash", 0.0)
-    except Exception:      # pragma: no cover
+    except Exception:      # noqa: BLE001 - ursina 内部抛什么都有可能
         pass
     return entity
 
@@ -314,6 +315,6 @@ def set_flash(entity, amount: float) -> None:
         return
     try:
         entity.set_shader_input("flash", max(0.0, min(1.0, float(amount))))
-    except Exception:      # pragma: no cover
+    except Exception:      # noqa: BLE001 - ursina 内部抛什么都有可能
         pass
 

@@ -31,14 +31,15 @@ M1 的方向换算与相机安全距离、M2 的射速/弹药/换弹/散布/瞄�
 M3 的视锥与听觉、M4 的存档清洗与重开契约、M5 的音效去重与菜单流转、
 M6 的飘字投影与失焦判定、资源路径、光照参数与窗口图标类型、
 合并几何的绕序与顶点色，
-已固化成 **429 项**测试，不启动窗口就能跑，改完代码先跑一遍再开游戏。
+已固化成 **459 项**测试，不启动窗口就能跑，改完代码先跑一遍再开游戏。
 （合并几何之后跑测试从 8 秒降到 3 秒 —— 少建了几百个实体。）
 
 端到端还有几个探针（同样不开窗口，用 `window_type='none'` 走真实接线）：
 
 ```powershell
-python tools/m5_probe.py     # 57 项：菜单→开局→暂停→死亡→重开→回菜单→音效
+python tools/m5_probe.py     # 87 项：菜单→开局→暂停→死亡→重开→回菜单→音效→30 波通关→BOSS 层
 python tools/m3_probe.py     # 22 项：AI / 波次 / 远程兵
+python tools/_probe_shotgun.py  # 16 项：按距离逐段开火，量真实伤害
 python tools/aim_probe.py    # 4 项：屏幕中心射线
 ```
 
@@ -112,6 +113,74 @@ Windows 窗口层也会打 `Could not find icon filename` 并退回默认图标�
 再切回来会**接着装**，不是从头装（`WeaponState` 的状态一直在，切枪只改下标）。
 慢一半是为了保留"现在换回来会卡一下"的取舍。
 
+## 工程化
+
+### 静态检查
+
+```powershell
+pip install -r requirements-dev.txt
+python -m ruff check .     # 风格 + 疑似 bug
+python -m mypy             # 类型
+```
+
+两个工具都配在 `pyproject.toml` 里，**当前是零告警**。
+
+- `ruff` 选了 `F/E/W/I/UP/B/C4/SIM/RUF/BLE`。`BLE`（盲 `except`）是有意开的：
+  这个项目要吞 Panda3D 和音频的各种异常，但每一处都得写明理由，
+  所以代码里会看到 `except Exception:  # noqa: BLE001 - 理由`。
+  **`tools/` 整目录不参与检查** —— 探针必须在 `from ursina import *` 之后
+  import 项目模块，`E402` 是结构性的，加一堆 `noqa` 只是噪音。
+- `mypy` 是**宽松模式**：ursina / panda3d 都没有类型标注，strict 会逼出一堆
+  `type: ignore`，维护成本远高于收益。现在只求抓住"传错参数 / 拼错属性"。
+  覆盖面是 `src/` + `main.py`（`tests/` 全是鸭子类型 stub，放进去只会淹没真错误）。
+
+上线了才发现的问题里，有一条是这么抓出来的：`ClearPanel.reset()`
+被**定义了两次**，后一个把前一个整个覆盖，于是"打完 BOSS 之后卡片缩着不还原"
+这个当时以为修好的 bug 其实一直是坏的。`F811`（重复定义）报的就是它。
+
+### 分级日志
+
+原来是 27 处裸 `print` 散在 12 个文件里 —— 发布版想静音只有"全部注释掉"一条路，
+但那会把"存档写失败""音效装载失败"一起埋掉。现在是四档，一个环境变量切换：
+
+| `MINITPS_LOG` | 你会看到 |
+|---------------|----------|
+| `DEBUG` | 每条生成点重采样、每次换弹（只在排查时开） |
+| `INFO` | **开发期默认**。波次、重开、装载结果 |
+| `WARNING` | **打包后默认**。能跑但不对劲 |
+| `ERROR` | 只留"功能已经坏了" |
+| `OFF` | 全静音 |
+
+写错的值不会炸，退回默认档。用法：
+
+```powershell
+$env:MINITPS_LOG="DEBUG"; python main.py     # 一次性的详细日志
+python main.py                               # 默认 INFO
+```
+
+同时写一份到 `%APPDATA%\MiniTPS\log.txt`（超过 1 MB 轮转一份，保留 1 份备份），
+行首带时间/级别/模块名。**文件打不开时只降级不抛异常** —— 只读目录、权限受限的
+机器照样能玩，这才是这条日志存在的意义。CI 和探针传 `path=""` 完全不落盘。
+
+### CI 与许可
+
+`.github/workflows/ci.yml` 三个 job，push / PR 都跑：
+
+| job | 平台 | 跑什么 |
+|-----|------|--------|
+| `test` | `windows-latest` | `pytest` |
+| `lint` | `ubuntu-latest` | `ruff check` |
+| `types` | `ubuntu-latest` | `mypy`（**故意不装 ursina**，靠 `ignore_missing_imports`） |
+
+测试放 Windows 是因为这个项目只在 Windows 上验收（Panda3D 的窗口层差异足以让
+测试绿而游戏坏）。`types` 不装 ursina 是为了让"类型检查该有多快"不被 panda3d
+那 200 MB 拖住 —— 反正它对 mypy 来说本来就没有标注。
+
+没有 `ruff format --check`：接 formatter 会把整个仓库重排一遍（几百行纯换行 diff），
+而现有代码的手工排版（注释对齐、分组空行）是刻意留的。行长也不硬卡（`E501` 关闭）。
+
+许可：**MIT**，见 `LICENSE`。
+
 ## 当前进度
 
 - [x] **M0 骨架**：单主循环 / GameClock / 状态机 / 事件总线 / 输入接管 / 调试覆盖层
@@ -125,6 +194,7 @@ Windows 窗口层也会打 `Could not find icon filename` 并退回默认图标�
 - [x] **M7 性能**：静态场地 / 玩家 / 敌人全部烘焙成单 mesh（可见 draw call 649 → 75）
 - [x] **M7 内容（一）**：30 波通关 + 第 31 层 BOSS「Liang」+ 重甲每 6 波一只
 - [x] **M7 内容（二）**：霰弹枪（第 10 波解锁 / 距离分段 / 后台换弹）
+- [x] **M7 工程化**：分级日志（`MINITPS_LOG` 一键静音）/ ruff + mypy 零告警 / GitHub Actions / MIT 许可
 
 ## 操作
 
@@ -203,10 +273,13 @@ data/                数值配置 json
 tests/               单元测试
 ```
 
-## 三条不能破的规矩
+## 四条不能破的规矩
 
 1. **只有 `GameLoop` 一个 Entity 实现 `update()`**。其余系统都是普通对象，
    由主循环按显式顺序调用。
 2. **只有 `GameClock` 能读 `time.dt`**。暂停用 `clock.paused`，
    绝对不要用 `application.paused`（它会把全局输入回调一起关掉）。
 3. **不要在业务代码里写按键字符串**，一律引用 `src/core/input_map.py` 的常量。
+4. **不要在 `src/` 里写 `print`**，用 `src/core/log.py` 的 `get_logger(模块名)`。
+   `tests/test_log.py` 里有一条 AST 检查守着这条 —— 唯一的例外是 `log.py`
+   自己那处兜底（日志文件打不开时，日志系统还没装好，绕回去会递归）。

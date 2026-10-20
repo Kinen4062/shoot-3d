@@ -14,12 +14,10 @@
 """
 from __future__ import annotations
 
-from typing import Callable, Generic, TypeVar
-
-T = TypeVar("T")
+from collections.abc import Callable
 
 
-class EntityPool(Generic[T]):
+class EntityPool[T]:
     def __init__(self, factory: Callable[[], T], size: int) -> None:
         self.capacity = size
         self.overflows = 0

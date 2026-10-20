@@ -1,0 +1,58 @@
+name: CI
+
+# push 到任何分支、以及所有 PR 都跑。三个 job 并行，任一失败就是红叉。
+on:
+  push:
+  pull_request:
+
+# 同一个分支连续 push 时，取消上一次还没跑完的 —— 省额度也省等待。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest
+    # 用 Windows 而不是 ubuntu：这个项目只在 Windows 上开发和验收，
+    # 换成 Linux 就得额外处理 OpenGL / 字体 / 路径大小写，
+    # 验的就不再是玩家实际跑的那套环境了。
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 安装依赖
+        run: pip install -r requirements-dev.txt
+      - name: 单元测试（不建窗口）
+        run: python -m pytest
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      # 只跑 lint，不跑 `ruff format --check`：整个仓库没格式化过，
+      # 一开就会红成一片，而那是纯样式问题，不该挡住功能提交。
+      - run: ruff check . --output-format=github
+
+  types:
+    name: mypy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # 故意不装 ursina：它没有类型标注，装上和不装对 mypy 的结果一样，
+      # 但会多拉一个几十 MB 的 panda3d。pyproject 里已配 ignore_missing_imports。
+      - run: pip install mypy
+      - run: mypy

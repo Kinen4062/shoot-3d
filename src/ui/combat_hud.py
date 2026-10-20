@@ -20,7 +20,7 @@ M4 阶段这些数字都写在左上角的调试覆盖层里 —— 那不是给
 """
 from __future__ import annotations
 
-from ursina import Entity, camera, color, window
+from ursina import Entity, camera, window
 
 from src.core.game_state import State
 from src.systems.wave import BOSS_KIND

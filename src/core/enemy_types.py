@@ -15,6 +15,9 @@ import json
 from dataclasses import dataclass
 
 from src.core import config
+from src.core.log import get_logger
+
+log = get_logger("enemies")
 
 # 缺字段时不要静默给默认值：数值表写错一个键名，敌人会变成「打不死也打不到人」，
 # 但游戏照常运行，极难排查。宁可启动时报错，也不要把错误藏起来。
@@ -48,7 +51,8 @@ def _to_rgb(raw) -> tuple[int, int, int]:
         raise ValueError(f"color 必须是 [r,g,b] 三元组，收到 {raw!r}")
     # 两种写法都接受：0~1 浮点（规划书口径）或 0~255 整数。
     if max(raw[:3]) <= 1.0:
-        return tuple(max(0, min(255, int(round(c * 255)))) for c in raw[:3])  # type: ignore[return-value]
+        return tuple(max(0, min(255, round(c * 255))) for c in raw[:3])
+    # `tuple(生成器)` 的长度在类型上不可知，这里靠上游的 len 检查保证是 3 元。
     return tuple(max(0, min(255, int(c))) for c in raw[:3])  # type: ignore[return-value]
 
 
@@ -131,9 +135,9 @@ def load_or_fallback() -> dict[str, EnemyData]:
     path = config.resource_path(config.ENEMY_FILE)
     try:
         data = load_enemy_types(path)
-        print("[M3] enemies loaded -> " + "  ".join(
+        log.info("[M3] enemies loaded -> " + "  ".join(
             f"{k}:{int(v.hp)}hp/{v.speed}m/s" for k, v in data.items()))
         return data
     except (OSError, ValueError, KeyError) as exc:
-        print(f"[M3] 敌人表读取失败（{exc}），改用内置兜底数值")
+        log.warning(f"[M3] 敌人表读取失败（{exc}），改用内置兜底数值")
         return dict(FALLBACK_ENEMY_TYPES)

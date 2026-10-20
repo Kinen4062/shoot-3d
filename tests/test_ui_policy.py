@@ -47,7 +47,8 @@ def test_overlay_hidden_in_menu_is_not_just_disabled():
     挪进 `enabled`。
     """
     from src.ui import debug_overlay
-    source = open(debug_overlay.__file__, encoding="utf-8").read()
+    with open(debug_overlay.__file__, encoding="utf-8") as handle:
+        source = handle.read()
     assert "self.label.visible = show" in source
     assert "self.label.enabled" not in source
 

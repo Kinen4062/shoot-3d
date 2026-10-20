@@ -1,0 +1,5 @@
+# 开发期依赖（CI 用这个文件，和 pyproject.toml 的 [dev] 保持一致）
+-r requirements.txt
+
+ruff>=0.6
+mypy>=1.11

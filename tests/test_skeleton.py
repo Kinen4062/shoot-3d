@@ -6,8 +6,6 @@
 import importlib
 from pathlib import Path
 
-import ursina
-
 ROOT = Path(__file__).resolve().parent.parent
 
 PACKAGES = ["src", "src/core", "src/entities", "src/systems", "src/ui"]

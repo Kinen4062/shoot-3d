@@ -27,7 +27,7 @@ from enum import Enum
 
 from src.core import config
 from src.core.enemy_types import EnemyData
-from src.systems.perception import turn_toward, wrap_deg, yaw_to
+from src.systems.perception import wrap_deg, yaw_to
 
 # 走到最后已知位置多近算「到了」。
 SEARCH_ARRIVE = 0.8

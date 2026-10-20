@@ -25,8 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from panda3d.core import Geom, GeomTriangles, GeomVertexData, GeomVertexFormat
-from panda3d.core import GeomVertexWriter
+from panda3d.core import Geom, GeomTriangles, GeomVertexData, GeomVertexFormat, GeomVertexWriter
 from ursina import Mesh
 
 
@@ -117,7 +116,7 @@ def box_batch(boxes, name: str = "box_batch") -> Mesh:
 
         for normal, u, v in FACES:
             # 四角：(-u-v), (+u-v), (+u+v), (-u+v) —— 这个顺序让 (v1-v0)×(v2-v0) = 法线
-            for (su, sv), uv in zip(((-1, -1), (1, -1), (1, 1), (-1, 1)), FACE_UVS):
+            for (su, sv), uv in zip(((-1, -1), (1, -1), (1, 1), (-1, 1)), FACE_UVS, strict=True):
                 vertices.append(_corner(center, half, normal, u, v, su, sv))
                 normals.append(normal)
                 colors.append(rgba)
@@ -164,7 +163,7 @@ def model_from_boxes(boxes, name: str = "box_batch"):
         half = (size[0] / 2.0, size[1] / 2.0, size[2] / 2.0)
         base = vertex.get_write_row()
         for n, u, v in FACES:
-            for (su, sv), uv in zip(((-1, -1), (1, -1), (1, 1), (-1, 1)), FACE_UVS):
+            for (su, sv), uv in zip(((-1, -1), (1, -1), (1, 1), (-1, 1)), FACE_UVS, strict=True):
                 vertex.add_data3(*_corner(center, half, n, u, v, su, sv))
                 normal_w.add_data3(*n)
                 color_w.add_data4(*rgba_)

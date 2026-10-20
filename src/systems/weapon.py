@@ -24,15 +24,21 @@ import json
 import math
 import random
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ursina import Vec3, mouse
 
 from src.core import config, event_bus
 from src.core.game_state import State
+from src.core.log import get_logger
 from src.core.ray import raycast
 from src.core.screen_ray import log_geometry_once, screen_center_ray
 from src.entities.enemy import enemy_from
 
+if TYPE_CHECKING:
+    # 只在标注里用到：波次系统反过来也依赖武器系统（掉落、解锁判断），
+    # 运行时导入会成环。
+    from src.systems.wave import WaveSystem
 
 # ---------------------------------------------------------------- 数据
 
@@ -210,6 +216,8 @@ def damage_at(data: WeaponData, distance: float) -> float:
     return data.damage
 
 
+log = get_logger("weapon")
+
 # 按了还没解锁的槽位时，HUD 上的提示持续多久（秒）。
 LOCKED_HINT_TIME = 3.0
 
@@ -222,10 +230,13 @@ def apply_spread(direction: Vec3, spread_deg: float, rng: random.Random | None =
     if spread_deg <= 0.0:
         return direction
 
-    rng = rng or random
+    # 没传 rng 就用模块级的那套。两者都能提供 `.random()`，但类型不同
+    # （`Random.random` 是绑定方法、模块里是普通函数），所以先取成样本函数 ——
+    # 直接写 `rng = rng or random` 会让 `rng` 的标注从 `Random|None` 变成模块。
+    sample = rng.random if rng is not None else random.random
     radius = math.radians(spread_deg)
-    theta = radius * math.sqrt(rng.random())
-    phi = rng.random() * math.tau
+    theta = radius * math.sqrt(sample())
+    phi = sample() * math.tau
 
     axis = Vec3(direction).normalized()
     helper = Vec3(0, 1, 0) if abs(axis.y) < 0.99 else Vec3(1, 0, 0)
@@ -250,7 +261,8 @@ class WeaponSystem:
         # 波次来源由 `main.build_world` 后挂（和 `enemies.projectiles` 同一个约定）：
         # 武器比波次系统先构造，而且武器只需要读一个 `wave` 数字。
         # 传 None 就当作"第 0 波"——锁定武器全部不可用，不会静默解锁。
-        self.waves = None
+        # 波次系统比武器晚构造，这里后挂（用来判断霰弹枪解锁没有）。
+        self.waves: WaveSystem | None = None
 
         self.weapons = self._load()
         self.slots = list(self.weapons.keys())
@@ -309,10 +321,10 @@ class WeaponSystem:
         try:
             data = load_weapons(path)
             summary = "  ".join(f"{k}:{v.damage}伤/{v.fire_rate}s/{v.mag_size}发" for k, v in data.items())
-            print(f"[M2] weapons loaded -> {summary}")
+            log.info(f"[M2] weapons loaded -> {summary}")
             return data
         except (OSError, ValueError, KeyError) as exc:
-            print(f"[M2] 武器表读取失败（{exc}），改用内置兜底数值")
+            log.warning(f"[M2] 武器表读取失败（{exc}），改用内置兜底数值")
             return dict(FALLBACK_WEAPONS)
 
     # ---- 输入回调 ----
@@ -583,7 +595,7 @@ class WeaponSystem:
         # 「没打中靶子」就一定意味着弹道方向或遮挡有问题，必须能带出证据。
         # 腰射本来就允许偏，不打印，避免刷屏。
         if config.SHOT_MISS_LOG and self.aiming and not self.last_damaged:
-            print(
+            log.debug(
                 f"[shot] 瞄准未命中  spread={self.spread_deg:.2f}deg  last={self.last_hit_name}  "
                 f"dist={hit.distance:5.2f}  origin={tuple(round(v, 2) for v in origin)}  "
                 f"dir={tuple(round(v, 3) for v in direction)}"

@@ -14,7 +14,7 @@ import math
 
 import pytest
 from panda3d.core import LPoint3
-from ursina import Entity, color
+from ursina import Entity
 
 from src.core import config, lighting, mesh_builder
 from src.core.ray import raycast
@@ -23,7 +23,6 @@ from src.entities.arena import Arena
 from src.entities.enemy import Enemy
 from src.entities.gun import Gun
 from src.entities.player import Player
-
 
 # ---------------------------------------------------------------- 光照
 
@@ -39,7 +38,7 @@ def test_top_face_is_brightest_and_bottom_is_darkest():
              lighting.shade_for_normal(0, 0, 1), lighting.shade_for_normal(0, 0, -1)]
 
     assert all(top > side > bottom for side in sides)
-    assert len(set(round(s, 3) for s in sides)) >= 3, "四个侧面至少要能分出三档深浅"
+    assert len({round(s, 3) for s in sides}) >= 3, "四个侧面至少要能分出三档深浅"
 
 
 def test_no_face_gets_crushed_to_black():
@@ -736,7 +735,7 @@ def test_enemy_rig_cancels_parent_scale():
     try:
         for kind, _data, enemy in squad:
             scale = enemy.body.rig.world_scale
-            for axis, value in zip("xyz", scale):
+            for axis, value in zip("xyz", scale, strict=True):
                 assert math.isclose(value, 1.0, abs_tol=1e-4), (
                     f"{kind} 的 rig {axis} 缩放是 {value:.3f}，内部坐标不是米了")
     finally:

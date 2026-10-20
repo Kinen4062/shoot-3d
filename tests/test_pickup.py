@@ -86,7 +86,7 @@ def test_drop_rate_matches_config():
 
 def test_weight_distribution_follows_table():
     rng = random.Random(4)
-    counts = {k: 0 for k in KINDS}
+    counts = dict.fromkeys(KINDS, 0)
     total = 30000
     for _ in range(total):
         kind = roll_drop(rng, chance=1.0)

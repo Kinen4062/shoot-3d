@@ -7,8 +7,6 @@
 import json
 import os
 
-import pytest
-
 from src.core import save
 
 

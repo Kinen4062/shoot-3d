@@ -93,7 +93,7 @@ def test_camera_distance_stays_positive_near_walls():
 
 
 def test_arena_inner_is_the_wall_face():
-    assert config.ARENA_INNER == pytest.approx(config.ARENA_HALF - config.WALL_THICKNESS / 2)
+    assert pytest.approx(config.ARENA_HALF - config.WALL_THICKNESS / 2) == config.ARENA_INNER
 
 
 def test_player_limit_keeps_body_outside_wall():

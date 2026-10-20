@@ -18,7 +18,10 @@ from dataclasses import dataclass
 
 from src.core import config, event_bus
 from src.core.game_state import State
+from src.core.log import get_logger
 from src.systems.perception import yaw_delta, yaw_to
+
+log = get_logger("wave")
 
 # 生成点重采样上限。规划书写的是 10，别调大 ——
 # 场地里挤满了人时，重采样只会白烧 CPU，还生成不出来。
@@ -90,10 +93,10 @@ def load_or_fallback() -> WaveTable:
     path = config.resource_path(config.WAVE_FILE)
     try:
         table = load_waves(path)
-        print(f"[M3] waves loaded -> {len(table.waves)} 波  rest={table.rest_time}s")
+        log.info(f"[M3] waves loaded -> {len(table.waves)} 波  rest={table.rest_time}s")
         return table
     except (OSError, ValueError, KeyError) as exc:
-        print(f"[M3] 波次表读取失败（{exc}），改用内置兜底")
+        log.warning(f"[M3] 波次表读取失败（{exc}），改用内置兜底")
         return FALLBACK_WAVES
 
 
@@ -304,7 +307,7 @@ class WaveSystem:
         self.phase = "SPAWN"
         self.spawn_timer = 0.0
         event_bus.emit("wave_started", wave=self.wave, total=len(queue))
-        print(f"[M3] wave {self.wave} started  {comp}  hp×{hp_multiplier(self.wave):.2f}")
+        log.info(f"[M3] wave {self.wave} started  {comp}  hp×{hp_multiplier(self.wave):.2f}")
 
     def _spawn_step(self, dt: float) -> None:
         self.spawn_timer -= dt

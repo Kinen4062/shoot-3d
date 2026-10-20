@@ -13,6 +13,9 @@ from __future__ import annotations
 from src.core import config, event_bus, save
 from src.core.game_data import GameData, get_data
 from src.core.game_state import State
+from src.core.log import get_logger
+
+log = get_logger("score")
 
 
 class ScoreSystem:
@@ -112,7 +115,7 @@ class ScoreSystem:
         stored = save.record_run(self.data.score, self.data.wave, self.data.kills)
         self.data.best_score = max(self.data.best_score, stored["best_score"])
         self.data.best_wave = max(self.data.best_wave, stored["best_wave"])
-        print(
+        log.info(
             f"[M4] {reason}  score={self.data.score}  kills={self.data.kills}  "
             f"wave={self.data.wave}  best={self.data.best_score}"
         )

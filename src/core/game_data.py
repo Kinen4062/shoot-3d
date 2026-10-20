@@ -21,8 +21,14 @@ from src.core import config, save
 
 class GameData:
     __slots__ = (
-        "score", "combo", "combo_timer", "kills", "wave",
-        "time_alive", "best_score", "best_wave",
+        "best_score",
+        "best_wave",
+        "combo",
+        "combo_timer",
+        "kills",
+        "score",
+        "time_alive",
+        "wave",
     )
 
     def __init__(self) -> None:

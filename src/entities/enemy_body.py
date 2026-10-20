@@ -120,7 +120,8 @@ def palette(rgb: tuple[int, int, int]) -> dict[str, tuple[int, int, int]]:
 
 def unit_scale(parent_scale) -> tuple[float, float, float]:
     """抵消宿主非等比缩放的倒数。和 `player_body.unit_scale` 同一个约定。"""
-    return tuple(1.0 / s if abs(s) > 1e-6 else 1.0 for s in parent_scale)
+    # 长度断言同 `player_body.unit_scale`。
+    return tuple(1.0 / s if abs(s) > 1e-6 else 1.0 for s in parent_scale)  # type: ignore[return-value]
 
 
 def build(parent: Entity, kind: str, size, rgb: tuple[int, int, int]) -> Body:

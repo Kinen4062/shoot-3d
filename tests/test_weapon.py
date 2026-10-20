@@ -49,7 +49,7 @@ def test_weapons_json_loads_and_is_complete():
 def test_fallback_matches_shipped_json():
     """打包后 data/ 丢了会退回内置数值，两者必须一致，否则行为会悄悄变。"""
     shipped = load_weapons(config.resource_path(config.WEAPON_FILE))
-    assert FALLBACK_WEAPONS == shipped
+    assert shipped == FALLBACK_WEAPONS
 
 
 # ---------------------------------------------------------------- 射速

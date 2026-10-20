@@ -7,11 +7,13 @@
 """
 from __future__ import annotations
 
-import logging
 from collections import deque
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-log = logging.getLogger(__name__)
+from src.core.log import get_logger
+
+log = get_logger("events")
 
 _listeners: dict[str, list[Callable[..., Any]]] = {}
 _deferred: deque[tuple[Callable[..., Any], tuple, dict]] = deque()

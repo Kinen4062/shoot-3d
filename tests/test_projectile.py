@@ -5,8 +5,6 @@
 """
 from __future__ import annotations
 
-import pytest
-
 from src.systems.projectile_system import segment_hits_sphere
 
 

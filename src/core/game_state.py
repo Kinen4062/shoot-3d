@@ -7,8 +7,9 @@ Ursina 按场景图顺序给每个 Entity 分发 update()，玩家和敌人谁�
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from enum import Enum
-from typing import Protocol
+from typing import Any, Protocol
 
 from ursina import Entity, mouse
 
@@ -105,7 +106,7 @@ class GameStateMachine:
         加上 CLEARED 是为了能在不做完 30 波的前提下直接验通关面板：
         手打 30 波要二十多分钟，改动结算界面不可能每次都那么验。
         """
-        idx = _ORDER.index(self._state)  # type: ignore[arg-type]
+        idx = _ORDER.index(self._state)
         self.set(_ORDER[(idx + 1) % len(_ORDER)])
 
 
@@ -125,7 +126,7 @@ class GameLoop(Entity):
         systems: list[System],
         clock,
         state: GameStateMachine,
-        ui_systems: tuple = (),
+        ui_systems: Sequence[Any] = (),
     ) -> None:
         super().__init__(name="game_loop")
         self.systems = list(systems)

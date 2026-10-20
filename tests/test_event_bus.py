@@ -39,7 +39,10 @@ def test_emit_without_listener_is_noop():
 
 def test_off():
     seen = []
-    fn = lambda **kw: seen.append(1)
+
+    def fn(**kw):
+        seen.append(1)
+
     event_bus.on("y", fn)
     event_bus.off("y", fn)
     event_bus.emit("y")

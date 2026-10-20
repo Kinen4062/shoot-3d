@@ -73,10 +73,7 @@ def popup_curve(age: float, life: float) -> tuple[float, float]:
         return 1.0, 0.0
     k = max(0.0, min(1.0, age / life))
     rise = k ** 0.5
-    if k < 0.35:
-        alpha = 1.0
-    else:
-        alpha = 1.0 - (k - 0.35) / 0.65
+    alpha = 1.0 if k < 0.35 else 1.0 - (k - 0.35) / 0.65
     return rise, max(0.0, alpha)
 
 

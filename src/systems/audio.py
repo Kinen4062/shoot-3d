@@ -29,6 +29,9 @@ import os
 import random
 
 from src.core import config
+from src.core.log import get_logger
+
+log = get_logger("audio")
 
 
 def clamp01(value: float) -> float:
@@ -121,13 +124,13 @@ class AudioSystem:
             if not os.path.exists(path):
                 # 只提示一次。每帧提示会把控制台刷满，反而看不到真正的报错。
                 self.missing.add(name)
-                print(f"[M5] 缺音效 {name}.wav —— 静默跳过（python tools/gen_sfx.py 可生成）")
+                log.warning(f"[M5] 缺音效 {name}.wav —— 静默跳过（python tools/gen_sfx.py 可生成）")
                 return None
             try:
                 pool = [self._load_clip(name, path) for _ in range(config.AUDIO_POOL_SIZE)]
             except Exception as exc:      # noqa: BLE001 - 声卡/解码器异常不能让游戏起不来
                 self.missing.add(name)
-                print(f"[M5] 音效 {name}.wav 装载失败（{type(exc).__name__}: {exc}），跳过")
+                log.warning(f"[M5] 音效 {name}.wav 装载失败（{type(exc).__name__}: {exc}），跳过")
                 return None
 
         self._pools[name] = pool
@@ -162,7 +165,7 @@ class AudioSystem:
             clip.volume = mix_volume(base, volume_scale, self.master, self.sfx)
             clip.play()
         except Exception as exc:      # noqa: BLE001 - 音频驱动异常不能拖垮游戏主循环
-            print(f"[M5] 播放 {name} 失败：{type(exc).__name__}: {exc}")
+            log.warning(f"[M5] 播放 {name} 失败：{type(exc).__name__}: {exc}")
             self.missing.add(name)
             return False
         self.plays += 1
@@ -189,14 +192,14 @@ class AudioSystem:
                 return self._bgm
             except Exception as exc:  # noqa: BLE001
                 self._bgm_failed = True
-                print(f"[M6] 背景音乐装载失败（{type(exc).__name__}: {exc}），跳过")
+                log.warning(f"[M6] 背景音乐装载失败（{type(exc).__name__}: {exc}），跳过")
                 return None
 
         path = config.resource_path(config.BGM_FILE)
         if not os.path.exists(path):
             self._bgm_failed = True
             self.bgm_state = "missing"
-            print(f"[M6] 缺背景音乐 {config.BGM_FILE} —— 静默跳过")
+            log.warning(f"[M6] 缺背景音乐 {config.BGM_FILE} —— 静默跳过")
             return None
 
         try:
@@ -204,7 +207,7 @@ class AudioSystem:
         except Exception as exc:      # noqa: BLE001 - 解码器/声卡异常不能拦着游戏起不来
             self._bgm_failed = True
             self.bgm_state = "missing"
-            print(f"[M6] 背景音乐装载失败（{type(exc).__name__}: {exc}），跳过")
+            log.warning(f"[M6] 背景音乐装载失败（{type(exc).__name__}: {exc}），跳过")
             return None
         return self._bgm
 
@@ -258,7 +261,7 @@ class AudioSystem:
         except Exception as exc:      # noqa: BLE001
             self._bgm_failed = True
             self.bgm_state = "missing"
-            print(f"[M6] 播放背景音乐失败（{type(exc).__name__}: {exc}），跳过")
+            log.warning(f"[M6] 播放背景音乐失败（{type(exc).__name__}: {exc}），跳过")
             return False
         self.bgm_state = "playing"
         return True
@@ -299,7 +302,7 @@ class AudioSystem:
     # ---------------------------------------------------------------- 音量
     @property
     def volume_percent(self) -> int:
-        return int(round(self.master * 100))
+        return round(self.master * 100)
 
     def set_master(self, value: float) -> int:
         self.master = clamp01(value)
@@ -310,7 +313,7 @@ class AudioSystem:
         """按 `VOLUME_STEPS` 循环切换主音量，返回新的百分比（给按钮显示）。"""
         steps = config.VOLUME_STEPS
         current = self.volume_percent
-        percents = [int(round(s * 100)) for s in steps]
+        percents = [round(s * 100) for s in steps]
         # 找"当前值之后"的下一档；找不到（手工改过常量）就回到第一档。
         for pct in percents:
             if pct > current:

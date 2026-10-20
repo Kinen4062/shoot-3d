@@ -76,7 +76,7 @@ class Arena:
             ("wall_e", (wall_t, wall_h, size), (self.half, wall_h / 2, 0)),
             ("wall_w", (wall_t, wall_h, size), (-self.half, wall_h / 2, 0)),
         )
-        for name, scale, position in wall_specs:
+        for _name, scale, position in wall_specs:
             boxes.append((scale, position, mesh_builder.rgba(wall_rgb)))
 
         # 墙顶压条：一条 0.12 米高的浅色带子。没有它，墙和背景几乎同色，

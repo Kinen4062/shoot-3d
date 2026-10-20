@@ -1,0 +1,68 @@
+[project]
+name = "mini-tps"
+version = "0.1.0"
+description = "一个用 Ursina 写的极简波次生存第三人称射击游戏"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+# 运行期依赖只有 ursina（它会把 panda3d 一起带上）。
+dependencies = ["ursina>=8.3,<9"]
+
+[project.optional-dependencies]
+# 开发期：跑测试 + 静态检查。CI 走 requirements-dev.txt，内容与这里对齐。
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# `tools/` 整目录不参与 lint。里面是探针 / 截图 / 导出的临时脚本：
+#   1) 它们必须在 `from ursina import *` 之后 import 项目模块，E402 是结构性的，
+#      加一堆 `# noqa` 只是噪音；
+#   2) 一次性的现场调查代码，未使用变量、临时 print 都是刻意的。
+# 真正要守的是 `src/`、`tests/`、`main.py`。
+exclude = [".venv", "venv", "build", "dist", "tools"]
+
+[tool.ruff.lint]
+select = [
+    "F",    # pyflakes：未定义名、未使用导入 —— 抓真 bug 的主力
+    "E",    # pycodestyle 错误
+    "W",    # pycodestyle 警告
+    "I",    # import 排序
+    "UP",   # pyupgrade：过时写法
+    "B",    # bugbear：可变默认参数、循环里用 except 之类
+    "C4",   # 推导式可以更简单的地方
+    "SIM",  # 可以简化但没简化的分支
+    "RUF",  # ruff 自己的规则
+    "BLE",  # 盲 except：本项目要吞 Panda3D / 音频的各种异常，但每一处都得写明理由
+]
+ignore = [
+    # 没有接 formatter（`ruff format` 会重排整个仓库），所以按 100 列硬卡
+    # 只会制造一堆"为了换行而换行"的 diff。行长交给 review 看。
+    "E501",
+    # 中文注释里全角标点无关紧要；这条规则对中文项目噪音大于收益。
+    "RUF001", "RUF002", "RUF003",
+    # 游戏循环里 `try/except/pass` 是刻意的降级写法（音效、日志、渲染都这么写）。
+    "S110", "SIM105",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+# **宽松模式**：ursina / panda3d 都没有类型标注，strict 会逼出一大堆
+# `type: ignore`，维护成本远高于收益。这里只求抓住"传错参数/拼错属性"这一类。
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+show_error_codes = true
+# tests / tools 大量使用鸭子类型的 stub，放进去只会淹没真正的错误。
+files = ["src", "main.py"]
+
+[[tool.mypy.overrides]]
+module = ["ursina.*", "panda3d.*", "direct.*"]
+ignore_missing_imports = true

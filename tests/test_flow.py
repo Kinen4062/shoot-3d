@@ -159,7 +159,7 @@ def build(player=None, data=None, waves=None):
 # ---------------------------------------------------------------- 界面切换
 
 def test_sync_ui_follows_state():
-    session, state, _player, panels = build()
+    session, _state, _player, panels = build()
 
     session.sync_ui(State.MENU)
     assert panels["main_menu"].visible and not panels["pause_menu"].visible
@@ -233,7 +233,7 @@ def test_return_to_menu_switches_panel():
 
 
 def test_request_restart_is_noop_when_playing():
-    session, state, _player, _panels = build()
+    session, _state, _player, _panels = build()
     session.start_run()
     before = session.restarts
     assert session.request_restart() is False

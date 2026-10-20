@@ -11,10 +11,10 @@ import pytest
 from src.core import config
 from src.core.enemy_types import FALLBACK_ENEMY_TYPES
 from src.systems.enemy_ai import (
-    Brain,
-    BrainState,
     KEEP_MAX,
     KEEP_MIN,
+    Brain,
+    BrainState,
     separation_push,
 )
 
@@ -29,7 +29,7 @@ def make(data=GRUNT) -> Brain:
 def tick(brain: Brain, seconds: float, x: float = 0.0, z: float = 0.0,
          px: float = 0.0, pz: float = 0.0, sees: bool = True,
          dt: float = 1.0 / 60.0) -> None:
-    for _ in range(int(round(seconds / dt))):
+    for _ in range(round(seconds / dt)):
         brain.tick(dt, x, z, px, pz, sees)
 
 

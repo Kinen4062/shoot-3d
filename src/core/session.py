@@ -36,6 +36,9 @@ from __future__ import annotations
 
 from src.core import config, event_bus
 from src.core.game_state import State
+from src.core.log import get_logger
+
+log = get_logger("session")
 
 
 class RunSession:
@@ -334,4 +337,4 @@ class RunSession:
 
         if self.overlay is not None:
             self.overlay.on_state_changed()     # 立刻重画，别等 0.25s 节流
-        print(f"[M5] run reset  (restarts={self.restarts}, listeners={self.listener_count})")
+        log.info(f"[M5] run reset  (restarts={self.restarts}, listeners={self.listener_count})")

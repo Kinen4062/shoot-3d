@@ -121,7 +121,9 @@ def unit_scale(parent_scale) -> tuple[float, float, float]:
     用倒数而不是"把零件尺寸乘回去"：后者要求每个数字都记得乘，
     改一个尺寸就可能漏乘，表现是零件突然被拉长。
     """
-    return tuple(1.0 / s if abs(s) > 1e-6 else 1.0 for s in parent_scale)
+    # 上游传进来的是 Vec3（3 元），但 `tuple(生成器)` 在类型上长度不可知，
+    # 只能在这里断言一下返回值形状。
+    return tuple(1.0 / s if abs(s) > 1e-6 else 1.0 for s in parent_scale)  # type: ignore[return-value]
 
 
 def build_body(parent: Entity) -> Entity:

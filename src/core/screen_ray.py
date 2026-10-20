@@ -18,6 +18,10 @@ from __future__ import annotations
 
 from ursina import Vec3, camera
 
+from src.core.log import get_logger
+
+log = get_logger("aim")
+
 _logged = False
 
 
@@ -36,7 +40,7 @@ def log_geometry_once() -> None:
     _logged = True
 
     origin, direction = screen_center_ray()
-    print(
+    log.debug(
         f"[aim] origin={tuple(round(v, 3) for v in origin)}  "
         f"dir={tuple(round(v, 4) for v in direction)}"
     )

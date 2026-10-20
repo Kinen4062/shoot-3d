@@ -165,7 +165,7 @@ def test_zero_volume_still_plays():
 
 def test_event_handlers_map_to_sound_names():
     audio = make()
-    for handler, expected in (
+    for handler, _expected in (
         ("on_shot", "shoot"),
         ("on_hit", "hit"),
         ("on_kill", "kill"),
@@ -198,10 +198,10 @@ class FakeSound:
         self.stopped = 0
         self._t = 0.0
 
-    def setLoop(self, value):        # noqa: N802 - 对齐 Panda 的接口名
+    def setLoop(self, value):
         self.loop = bool(value)
 
-    def setVolume(self, value):      # noqa: N802
+    def setVolume(self, value):
         self.volume = value
 
     def play(self):
@@ -210,10 +210,10 @@ class FakeSound:
     def stop(self):
         self.stopped += 1
 
-    def getTime(self):               # noqa: N802
+    def getTime(self):
         return self._t
 
-    def setTime(self, value):        # noqa: N802
+    def setTime(self, value):
         self._t = value
 
 
@@ -276,7 +276,7 @@ def test_bgm_volume_button_applies_immediately():
 
 def test_bgm_state_changed_pauses_and_resumes():
     from src.core.game_state import State
-    audio, sound = make_bgm()
+    audio, _sound = make_bgm()
     audio.start_bgm()
     audio.on_state_changed(State.PAUSED)
     assert audio.bgm_state == "paused"

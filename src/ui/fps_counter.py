@@ -17,7 +17,7 @@ from ursina import Text, application, camera, window
 
 from src.core import config
 from src.core.game_state import State
-from src.ui.widgets import RGB_MUTED, RGB_TEXT, rgba32
+from src.ui.widgets import RGB_MUTED, rgba32
 
 RGB_FPS_GOOD = (140, 235, 170)
 RGB_FPS_WARN = (245, 205, 105)
