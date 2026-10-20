@@ -1,0 +1,23 @@
+# 行尾统一为 LF。
+#
+# 之前的仓库是混着的：大部分 src/ 文件是 LF，但 README、lighting.py、
+# enemy*.py、player_body.py 这几个（用脚本整文件生成过的那批）是 CRLF。
+# 后果是任何一次"整文件重写"（格式化、批量替换、脚本改注释）都会让 diff
+# 把**每一行**都算成改动，真正的逻辑变化埋在几千行噪音里 —— 已经踩过一次。
+#
+# eol=lf：仓库里存 LF，检出也按 LF。Windows 上的编辑器（PyCharm / VS Code）
+# 都认，`\r\n` 只在 .bat / .cmd 这类真的需要它的文件里才该出现。
+* text=auto eol=lf
+
+# 二进制资源：显式标出来，别让 git 试图做行尾转换或合并。
+*.wav binary
+*.ogg binary
+*.png binary
+*.ico binary
+*.glb binary
+*.ttf binary
+*.otf binary
+
+# Windows 批处理必须留 CRLF，否则 cmd 解析会出问题。
+*.bat text eol=crlf
+*.cmd text eol=crlf
