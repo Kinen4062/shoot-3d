@@ -1,0 +1,19 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 打包产物
+build/
+dist/
+*.spec
+
+# 工具缓存
+.pytest_cache/
+.idea/
+*.log
+
+# 探针生成的截图/临时模型（tools/_probe_*.py）
+tools/_shots/
+tools/_blockout/

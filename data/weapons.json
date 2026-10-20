@@ -1,0 +1,22 @@
+{
+  "pistol": {
+    "damage": 25,
+    "fire_rate": 0.25,
+    "mag_size": 12,
+    "reload_time": 1.2,
+    "spread": 0.25,
+    "range": 60,
+    "auto": false,
+    "pellets": 1
+  },
+  "rifle": {
+    "damage": 18,
+    "fire_rate": 0.1,
+    "mag_size": 30,
+    "reload_time": 1.8,
+    "spread": 0.5,
+    "range": 80,
+    "auto": true,
+    "pellets": 1
+  }
+}
