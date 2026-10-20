@@ -25,7 +25,11 @@ from panda3d.core import Filename  # noqa: E402
 from ursina import Ursina, application, camera, mouse  # noqa: E402
 
 NO_WINDOW = os.environ.get("NO_WINDOW") == "1"
-app = Ursina(window_type="offscreen" if NO_WINDOW else None, size=(1280, 720))
+app = Ursina(window_type="offscreen" if NO_WINDOW else None, size=(1280, 720),
+                 # 必须显式关掉：ursina 的 development_mode 默认是 True，
+                 # 会在右上角挂一块 "fps / entities / colliders" 的小浮层，
+                 # 截图里看起来就像游戏自带调试界面（main.py 里是关着的）。
+                 development_mode=False)
 type(mouse).locked = property(lambda self: False, lambda self, v: None)
 
 import tempfile                                       # noqa: E402
