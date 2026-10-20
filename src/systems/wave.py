@@ -278,6 +278,22 @@ class WaveSystem:
         self.boss_spawned = False
         return True
 
+    def skip_to_next_wave(self) -> int:
+        """开发期调试：立刻开始下一波，返回新的波次号。
+
+        **只管波次自己的状态**（队列 / 阶段 / 计时），不碰场上的敌人 ——
+        那属于 `EnemySystem`，由调用方 `DevTools.next_wave()` 先清掉。
+        已经通关或已在 BOSS 层时原样返回：这两种情况没有"下一波"可言，
+        硬跳会让 `compose_wave` 落进 32 波以上的公式分支，配比变得没意义。
+        """
+        if self.phase == "CLEARED" or self.wave >= BOSS_WAVE:
+            return self.wave
+        self.queue.clear()
+        self.spawn_timer = 0.0
+        self.reinforce_timer = 0.0
+        self._begin_wave()
+        return self.wave
+
     # ---- 每帧 ----
     def update(self, dt: float) -> None:
         if not self.state.in_state(State.PLAYING):

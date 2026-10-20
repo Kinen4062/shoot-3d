@@ -329,8 +329,15 @@ class AudioSystem:
         self._now += dt
 
     # ---------------------------------------------------------------- 事件
-    def on_shot(self, **_kwargs) -> None:
-        self.play("shoot")
+    def on_shot(self, sfx: str | None = None, **_kwargs) -> None:
+        """开火音效。`sfx` 由武器层在 `noise` 事件里带出来（霰弹枪 = "shotgun"）。
+
+        **拿 `SOUND_VOLUMES` 当白名单**：没登记过音量的名字说明既没合成文件、
+        也没调过响度，这时候播只会得到一声什么都没有（缺文件分支静默跳过）。
+        退回到步枪枪声是"听得出在开枪"的那一侧，比彻底没声好排查。
+        """
+        name = sfx if sfx in config.SOUND_VOLUMES else config.DEFAULT_SHOT_SFX
+        self.play(name)
 
     def on_hit(self, **_kwargs) -> None:
         self.play("hit")

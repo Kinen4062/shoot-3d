@@ -188,6 +188,16 @@ class WeaponState:
         return True
 
 
+def shot_sfx_for(weapon_name: str) -> str:
+    """这把枪开火时该播哪个音效名。
+
+    抽成纯函数是为了能在不起窗口的情况下钉住映射：
+    "霰弹枪有专属枪声"这件事一旦退化成 `play("shoot")`，听感上只会觉得
+    "换枪没什么区别"，没有任何报错会提示你。
+    """
+    return config.WEAPON_SHOT_SFX.get(weapon_name, config.DEFAULT_SHOT_SFX)
+
+
 def wave_damage_bonus(wave: int) -> int:
     """第 `wave` 波时，**单颗弹丸**的额外伤害。
 
@@ -540,8 +550,13 @@ class WeaponSystem:
         # 同一个事件可以挂多个监听者，不用改武器代码。
         # **一次扣弹只发一次**：霰弹枪 7 颗弹丸各发一次的话，
         # 噪音半径会因为重复触发而变得完全不可预期。
+        #
+        # `sfx` 让音频系统知道该放哪段枪声（霰弹枪有专属的一条）。
+        # 名字在这里算而不是让音频系统去猜"当前拿的是什么枪" ——
+        # 音频层不该认识武器表，否则每次加枪都要改两个地方。
         event_bus.emit("noise", position=self.player.world_position,
-                       radius=config.NOISE_RADIUS)
+                       radius=config.NOISE_RADIUS,
+                       sfx=shot_sfx_for(weapon.data.name))
 
         # 方向走 lens 反投影（屏幕正中心），不用 camera.forward：
         # 后者取节点局部 +Z，它是否等于投影轴取决于引擎内部约定，

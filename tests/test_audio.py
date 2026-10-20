@@ -186,6 +186,29 @@ def test_event_handlers_map_to_sound_names():
     }
 
 
+def test_shot_carries_the_weapon_s_sound_name():
+    """`noise` 事件里的 `sfx` 决定播哪段枪声（霰弹枪有专属的一条）。"""
+    audio = make()
+    audio.on_shot(sfx="shotgun")
+    assert audio.plays == 1
+    assert {c.name for c in audio.made} == {"shotgun"}
+
+
+def test_hit_sound_falls_back_when_no_sfx_is_given():
+    """`noise` 也可能来自别处（旧调用 / 测试），此时按步枪枪声走。"""
+    audio = make()
+    audio.on_shot()
+    assert {c.name for c in audio.made} == {"shoot"}
+
+
+def test_unknown_sfx_name_falls_back_instead_of_going_silent():
+    """名字写错时宁可听成步枪，也不要"一枪没声"——后者根本没线索。"""
+    audio = make()
+    audio.on_shot(sfx="shotgun_typo")
+    assert audio.plays == 1
+    assert {c.name for c in audio.made} == {"shoot"}
+
+
 # ---------------------------------------------------------------- BGM
 
 class FakeSound:

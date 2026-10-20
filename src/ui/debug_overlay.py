@@ -46,6 +46,7 @@ class DebugOverlay:
         self.pickups: Any = None         # 指向道具系统，显示场上道具数
         self.audio: Any = None           # 指向音效系统，显示播放/去重/缺文件计数
         self.input_map: Any = None       # 指向输入路由，显示最近一次按键
+        self.dev: Any = None             # 指向调试工具；None 表示没开 MINITPS_DEV
         self._acc = config.DEBUG_REFRESH_INTERVAL   # 首帧就刷新一次
 
         # 订阅由 core/session.py 统一注册（重开会 clear_listeners）。
@@ -173,6 +174,14 @@ class DebugOverlay:
         lines.append(
             f"input   : last={last or '-'}  L={int(mouse.left)} R={int(mouse.right)}"
         )
+
+        if self.dev is not None:
+            # 这行的用处：按了 F3 之后，god 是不是真的翻过来了。
+            # 无敌失效最典型的原因是"血照掉、但以为开了" —— 一眼看见 ON 才有意义。
+            lines.append(
+                f"dev     : god={'ON' if self.dev.god else 'off'}"
+                "   [F1] next wave  [F2] clear  [F3] god"
+            )
 
         lines.append("")
         lines.append("[TAB] cycle  [ESC] pause  WASD move  LMB fire  RMB aim  R reload  "

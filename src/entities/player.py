@@ -62,6 +62,12 @@ class Player(Entity):
 
         self.health = Health(config.PLAYER_MAX_HP, config.I_FRAME_TIME)
 
+        # 开发期无敌（`MINITPS_DEV=1` 时由 F3 切换，见 systems/dev_tools.py）。
+        # 放在实体上而不是 Health 里：`Health` 是纯逻辑、被单测钉死了边界，
+        # 往里加一个"只在开发时存在"的开关会让那套测试多出一个无关维度。
+        # `reset()` **不清它** —— 调试时重开一局还得是无敌，否则每死一次要重按。
+        self.god_mode = False
+
         # ---- M4 ----
         self.shield_charges = 0
         self.speed_mult = 1.0
@@ -103,11 +109,17 @@ class Player(Entity):
     def take_damage(self, amount: float) -> bool:
         """返回 False 表示这一下被无敌帧 / 护盾吃掉。
 
-        判定顺序很重要：**先无敌帧，再护盾，最后血量**。
+        判定顺序很重要：**先开发期无敌，再无敌帧，再护盾，最后血量**。
         反过来写的话，无敌帧期间挨打也会消耗护盾 ——
         玩家闪避翻滚时明明是无敌的，护盾却白白掉了一层。
         """
         if not self.health.alive or self.health.invulnerable:
+            return False
+
+        # 开发期无敌：直接吃掉这一下，**连护盾都不消耗**。
+        # 放在护盾之前是有意的 —— 无敌时掉护盾层数，等于用一个看不见的
+        # 状态去改一个看得见的数字，排查时会被这个差一误导。
+        if self.god_mode:
             return False
 
         if self.shield_charges > 0:

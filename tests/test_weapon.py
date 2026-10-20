@@ -58,6 +58,22 @@ def test_fallback_matches_shipped_json():
     assert shipped == FALLBACK_WEAPONS
 
 
+def test_shotgun_has_its_own_shot_sound():
+    """霰弹枪不再复用步枪的枪声。
+
+    这条退化的表现极其安静：换枪之后音色不变，玩家只会觉得"换枪没什么区别"，
+    不会报任何错。所以映射本身要钉住，名字还必须真的在 `SOUND_VOLUMES` 里
+    （音频系统拿它当白名单，写错会退回步枪、而不是变成一枪没声）。
+    """
+    from src.systems.weapon import shot_sfx_for
+
+    assert shot_sfx_for("shotgun") == "shotgun"
+    assert shot_sfx_for("shotgun") in config.SOUND_VOLUMES
+    assert shot_sfx_for("rifle") == "shoot"
+    assert shot_sfx_for("pistol") == "shoot"
+    assert shot_sfx_for("__nope__") == config.DEFAULT_SHOT_SFX
+
+
 # ---------------------------------------------------------------- 射速
 
 def test_fire_rate_gate():

@@ -286,6 +286,7 @@ AUDIO_PITCH_MAX = 1.05
 # 每种音效的基准音量。受伤/击杀要比环境音更显眼。
 SOUND_VOLUMES = {
     "shoot": 0.55,
+    "shotgun": 0.72,
     "hit": 0.45,
     "kill": 0.65,
     "hurt": 0.85,
@@ -296,6 +297,17 @@ SOUND_VOLUMES = {
     "wave": 0.60,
     "gameover": 0.75,
 }
+# 每把枪的开火音效（键是 `WeaponData.name`）。没写到的回落到 `DEFAULT_SHOT_SFX`。
+#
+# 为什么霰弹枪要单独一条：它和步枪共用一段"砰"时，0.5 秒一发的连射和步枪
+# 0.1 秒一发的连发在听觉上完全分不开 —— 换枪之后玩家唯一的反馈只剩 HUD 上的
+# 数字在变。专属音效的差异是**低频更重、尾巴更长**（见 tools/gen_sfx.py），
+# 这样"我拿的是霰弹枪"这件事不用看屏幕也知道。
+#
+# 名字必须同时出现在 SOUND_VOLUMES 里：音频系统拿它当白名单，
+# 写错（比如少个字母）会退回步枪枪声，而不是变成一枪没声。
+WEAPON_SHOT_SFX = {"shotgun": "shotgun"}
+DEFAULT_SHOT_SFX = "shoot"
 
 # ---------- M6 击杀飘字（规划书 §5.7）----------
 # 同时最多 12 个。一波 8 只怪、每只 0.9 秒，峰值就在 12 附近；
@@ -387,6 +399,15 @@ DEBUG_OVERLAY = True
 
 # 覆盖层刷新间隔（秒）。每帧重建文本会白白吃 CPU。
 DEBUG_REFRESH_INTERVAL = 0.25
+
+# 开发期调试热键（下一波 / 清场 / 无敌）：`MINITPS_DEV=1 python main.py` 打开。
+#
+# 默认关掉，不是"懒得做开关"：这三个键一旦钉在正式版里，玩家一次误触就能
+# 跳过一整波、或者带着无敌打完 30 波 —— 那已经不是这个游戏的难度了。
+# 环境变量的写法和 `MINITPS_LOG` 保持一致：认 1/true/yes/on，其余一律当关闭。
+DEVELOPMENT_TOOLS = os.environ.get("MINITPS_DEV", "").strip().lower() in (
+    "1", "true", "yes", "on",
+)
 
 
 def resource_path(rel: str) -> str:

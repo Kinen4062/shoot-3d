@@ -9,6 +9,9 @@ M5 阶段：主菜单 / 暂停 / 结算 + 正式 HUD + 音效。
 
 运行：直接运行本文件（PyCharm 里 Ctrl+Shift+F10 / 右键 Run 'main'）。
 音效资源用 `python tools/gen_sfx.py` 生成（已生成过就不用再跑）。
+
+开发期调试（下一波 / 清场 / 无敌）默认关闭，要这样开：
+    MINITPS_DEV=1 python main.py     # 然后 F1 下一波 / F2 清场 / F3 无敌
 """
 from __future__ import annotations
 
@@ -29,6 +32,7 @@ from src.entities.gun import Gun
 from src.entities.player import Player
 from src.systems.audio import AudioSystem
 from src.systems.camera_rig import CameraRig
+from src.systems.dev_tools import DevTools
 from src.systems.enemy_system import EnemySystem
 from src.systems.focus_watch import FocusWatch
 from src.systems.pickup_system import PickupSystem
@@ -142,6 +146,13 @@ def build_world() -> dict:
     # 所以这里后挂（和 `enemies.projectiles = projectiles` 同一个约定）。
     weapon.waves = waves
 
+    # ---- 开发期调试热键（MINITPS_DEV=1）----
+    # 默认 None：正式运行时连对象都不存在，按键进去也命中不了任何分支。
+    # 这不是"暂时没做开关"，是刻意的 —— 见 config.DEVELOPMENT_TOOLS 的注释。
+    dev = DevTools(waves=waves, enemies=enemies, player=player) if config.DEVELOPMENT_TOOLS else None
+    if dev is not None:
+        log.warning("[DEV] 调试热键已启用：F1 下一波 / F2 清场 / F3 无敌（这一局不计入正常验收）")
+
     # ---- M4：计分与道具 ----
     # 两者共用同一份 GameData（唯一真相源）。HUD 也读它，
     # 所以分数不会出现"HUD 显示的和结算界面不一致"。
@@ -206,6 +217,7 @@ def build_world() -> dict:
     overlay.score = score
     overlay.pickups = pickups
     overlay.audio = audio
+    overlay.dev = dev            # 只在 MINITPS_DEV=1 时有值，覆盖层据此多显示一行
 
     damage_flash = DamageFlash()
     wave_banner = WaveBanner(game_state)
@@ -265,7 +277,7 @@ def build_world() -> dict:
     )
     overlay.loop = loop
 
-    keys = InputMap(game_state, weapon, controller)
+    keys = InputMap(game_state, weapon, controller, dev=dev)
     keys.install()
     overlay.input_map = keys
 
@@ -305,6 +317,7 @@ def build_world() -> dict:
         "loop": loop,
         "overlay": overlay,
         "keys": keys,
+        "dev": dev,
     }
 
 
